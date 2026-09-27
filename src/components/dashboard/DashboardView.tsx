@@ -1,33 +1,44 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { useAuth } from '../../context/AuthContext';
 import { ActiveTab } from '../common/Sidebar';
-import { Sale } from '../../types';
+import { Sale, Product, TradeInRecord } from '../../types';
+import { TradeInInspectionModal } from '../pos/TradeInInspectionModal';
 import { ReceiptModal } from '../pos/ReceiptModal';
-import { 
-  PlusCircle, 
-  Barcode, 
-  PackagePlus, 
-  Truck, 
-  Wallet, 
-  TrendingUp, 
-  DollarSign, 
-  Receipt, 
-  Smartphone, 
-  AlertTriangle, 
-  PieChart as PieIcon, 
-  BarChart3, 
-  Clock, 
-  CheckCircle2, 
-  ExternalLink,
-  ChevronRight,
+import {
+  DollarSign,
+  Receipt,
+  Smartphone,
+  Wrench,
+  RotateCcw,
+  Plus,
+  PlusCircle,
+  Search,
+  AlertTriangle,
+  Clock,
+  Printer,
+  Eye,
+  CheckCircle2,
+  Calendar,
   Sparkles,
   ArrowUpRight,
+  ShieldCheck,
+  ChevronRight,
+  Package,
+  PackagePlus,
+  TrendingUp,
+  TrendingDown,
+  ShoppingBag,
+  Layers,
+  Barcode,
   CreditCard,
   Repeat,
-  Wrench
+  Truck,
+  Wallet,
+  BarChart3,
+  ExternalLink
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -35,40 +46,901 @@ interface DashboardViewProps {
   onOpenImeiSearch: () => void;
 }
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ setActiveTab, onOpenImeiSearch }) => {
-  const { 
-    products, 
-    sales, 
-    expenses, 
-    customers, 
-    repairs, 
-    auditLogs, 
-    isOnline, 
-    setLastCompletedSale 
-  } = useStore();
+interface CategorySlice {
+  name: string;
+  count: number;
+  percent: number;
+  color: string;
+}
+
+interface TrendPoint {
+  label: string;
+  revenue: number;
+}
+
+interface DashboardData {
+  todayRevenue: number;
+  todayOrders: number;
+  inventoryCount: number;
+  pendingRepairs: number;
+  tradeInCount: number;
+  lowStockCount: number;
+  yesterdayRevenue: number;
+  salesByCategory: CategorySlice[];
+  trendToday: TrendPoint[];
+  trendWeek: TrendPoint[];
+  trendMonth: TrendPoint[];
+  recentSales: Sale[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BRAND_RED = '#e61e25';
+
+const CATEGORY_COLORS: Record<string, string> = {
+  iPhone: '#3b82f6', // Blue
+  iPad: '#8b5cf6', // Purple
+  Mac: '#06b6d4', // Cyan
+  'Apple Watch': '#10b981', // Emerald
+  AirPods: '#f59e0b', // Amber
+  Accessories: '#ec4899', // Pink
+  Protection: '#6366f1', // Indigo
+  'Pre-Owned': '#f97316', // Orange
+  Other: '#64748b', // Slate
+};
+
+const PALETTE = [
+  '#3b82f6',
+  '#8b5cf6',
+  '#10b981',
+  '#f59e0b',
+  '#ec4899',
+  '#06b6d4',
+  '#6366f1',
+];
+
+const AVATAR_BG_COLORS = [
+  'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
+  'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper Functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+function fmtRs(val: number): string {
+  return `Rs. ${(val || 0).toLocaleString('en-LK', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function trendPct(today: number, yesterday: number): { pct: number; up: boolean } {
+  if (!yesterday || yesterday === 0) {
+    if (today > 0) return { pct: 100, up: true };
+    return { pct: 0, up: true };
+  }
+  const pct = Math.round(((today - yesterday) / yesterday) * 100);
+  return { pct: Math.abs(pct), up: pct >= 0 };
+}
+
+function getInitials(name?: string): string {
+  if (!name || name.trim() === '' || name.toLowerCase().includes('walk-in')) {
+    return 'WC';
+  }
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function getAvatarColor(name?: string): string {
+  if (!name) return AVATAR_BG_COLORS[0];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const idx = Math.abs(hash) % AVATAR_BG_COLORS.length;
+  return AVATAR_BG_COLORS[idx];
+}
+
+// Catmull-Rom to Cubic Bézier for smooth SVG spline line
+function buildSmoothSplinePath(
+  points: TrendPoint[],
+  w: number,
+  h: number,
+  pad = 14
+): {
+  line: string;
+  area: string;
+  coords: { x: number; y: number; revenue: number; label: string }[];
+} {
+  if (!points || points.length === 0) {
+    return {
+      line: `M 0,${h - pad} L ${w},${h - pad}`,
+      area: `M 0,${h - pad} L ${w},${h - pad} L ${w},${h} L 0,${h} Z`,
+      coords: [],
+    };
+  }
+
+  const max = Math.max(...points.map((p) => p.revenue || 0), 1);
+  const coords = points.map((p, i) => {
+    const x = points.length === 1 ? w / 2 : pad + (i / (points.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((p.revenue || 0) / max) * (h - pad * 2.4);
+    return { x, y, revenue: p.revenue || 0, label: p.label };
+  });
+
+  if (coords.length === 1) {
+    const pt = coords[0];
+    return {
+      line: `M ${pad},${pt.y} L ${w - pad},${pt.y}`,
+      area: `M ${pad},${pt.y} L ${w - pad},${pt.y} L ${w - pad},${h} L ${pad},${h} Z`,
+      coords,
+    };
+  }
+
+  // Generate smooth cubic Bézier segments
+  let line = `M ${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p0 = coords[Math.max(0, i - 1)];
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const p3 = coords[Math.min(coords.length - 1, i + 2)];
+
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+    line += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  }
+
+  const area = `${line} L ${coords[coords.length - 1].x.toFixed(1)},${h} L ${coords[0].x.toFixed(1)},${h} Z`;
+
+  return { line, area, coords };
+}
+
+// Build Donut Slices for SVG
+function buildDonutSlices(
+  slices: CategorySlice[],
+  cx: number,
+  cy: number,
+  r: number
+): { d: string; color: string; name: string }[] {
+  if (!slices || slices.length === 0) return [];
+  const total = slices.reduce((a, s) => a + s.count, 0) || 1;
+  let angle = -Math.PI / 2;
+  return slices.map((s) => {
+    const sweep = (s.count / total) * 2 * Math.PI;
+    const x1 = cx + r * Math.cos(angle);
+    const y1 = cy + r * Math.sin(angle);
+    angle += sweep;
+    const x2 = cx + r * Math.cos(angle);
+    const y2 = cy + r * Math.sin(angle);
+    const large = sweep > Math.PI ? 1 : 0;
+    return {
+      d: `M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`,
+      color: s.color,
+      name: s.name,
+    };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Skeleton Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+const Skeleton: React.FC<{ className?: string }> = ({ className = '' }) => (
+  <div className={`animate-pulse bg-slate-200 dark:bg-slate-700/60 rounded-xl ${className}`} />
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KPI Card Component (Matching reference image with vertical accent bar)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface KpiCardProps {
+  title: string;
+  value: string;
+  trendText: string;
+  trendSubtext: string;
+  isUp: boolean;
+  accentBarColor: string;
+  badgeBg: string;
+  badgeTextColor: string;
+  icon: React.ReactNode;
+  loading: boolean;
+}
+
+const KpiCard: React.FC<KpiCardProps> = ({
+  title,
+  value,
+  trendText,
+  trendSubtext,
+  isUp,
+  accentBarColor,
+  badgeBg,
+  badgeTextColor,
+  icon,
+  loading,
+}) => {
+  if (loading) {
+    return (
+      <div className="bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-2xl p-5 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-9 w-9 rounded-xl" />
+        </div>
+        <Skeleton className="h-7 w-28" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between group">
+      {/* Top row: Vertical accent bar + Title & Metric, and right badge icon */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          {/* Vertical Accent Bar */}
+          <div className={`w-1.5 h-10 rounded-full ${accentBarColor} flex-shrink-0 mt-0.5`} />
+          <div>
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+              {title}
+            </p>
+            <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight leading-tight mt-0.5">
+              {value}
+            </p>
+          </div>
+        </div>
+
+        {/* Top Right Subtle Badge Icon */}
+        <div
+          className={`w-9 h-9 rounded-xl ${badgeBg} ${badgeTextColor} flex items-center justify-center flex-shrink-0 shadow-xs transition-transform group-hover:scale-105`}
+        >
+          {icon}
+        </div>
+      </div>
+
+      {/* Bottom Trend */}
+      <div className="mt-3.5 flex items-center gap-1.5 text-xs">
+        <span
+          className={`inline-flex items-center font-bold gap-0.5 ${
+            isUp ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'
+          }`}
+        >
+          {isUp ? '↑' : '—'} {trendText}
+        </span>
+        <span className="text-slate-400 dark:text-slate-500 text-[11px] truncate">
+          {trendSubtext}
+        </span>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Donut Chart Component (Matching reference image "Invoice Statistics / Category Distribution")
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface DonutChartProps {
+  slices: CategorySlice[];
+  totalSalesCount: number;
+  loading: boolean;
+}
+
+const DonutChart: React.FC<DonutChartProps> = ({ slices, totalSalesCount, loading }) => {
+  const cx = 100;
+  const cy = 100;
+  const outerR = 78;
+  const innerR = 52;
+  const donutSlices = buildDonutSlices(slices, cx, cy, outerR);
+
+  return (
+    <div className="bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-2xl p-6 shadow-sm flex flex-col justify-between h-full">
+      {/* Card Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+            Sales by Category
+          </h3>
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            Product distribution across catalog
+          </p>
+        </div>
+        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+          Live
+        </span>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Skeleton className="w-36 h-36 rounded-full" />
+        </div>
+      ) : totalSalesCount === 0 || slices.length === 0 ? (
+        /* Empty State */
+        <div className="flex flex-col md:flex-row items-center justify-center gap-6 py-6">
+          <div className="relative w-36 h-36 flex items-center justify-center">
+            <svg viewBox="0 0 200 200" className="w-36 h-36 transform -rotate-90">
+              <circle
+                cx={cx}
+                cy={cy}
+                r={(outerR + innerR) / 2}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={outerR - innerR}
+                className="text-slate-100 dark:text-slate-800/80 stroke-dasharray-[6,6]"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-2xl font-black text-slate-800 dark:text-slate-200">0</span>
+              <span className="text-[10px] font-bold text-slate-400 tracking-wider">SALES</span>
+            </div>
+          </div>
+          <div className="text-center md:text-left space-y-1">
+            <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              No sales recorded yet
+            </p>
+            <p className="text-[11px] text-slate-400 max-w-[180px]">
+              Categories will automatically populate upon your first POS invoice.
+            </p>
+          </div>
+        </div>
+      ) : (
+        /* Populated Donut & Breakdown */
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-6 py-2">
+          {/* SVG Donut */}
+          <div className="relative w-40 h-40 flex-shrink-0 flex items-center justify-center">
+            <svg viewBox="0 0 200 200" className="w-40 h-40">
+              <defs>
+                <mask id="donut-mask">
+                  <rect width="200" height="200" fill="white" />
+                  <circle cx={cx} cy={cy} r={innerR} fill="black" />
+                </mask>
+              </defs>
+              <g mask="url(#donut-mask)">
+                {donutSlices.map((s, i) => (
+                  <path
+                    key={i}
+                    d={s.d}
+                    fill={s.color}
+                    className="transition-all hover:opacity-85 cursor-pointer"
+                  >
+                    <title>{`${s.name}: ${slices[i]?.count || 0} (${slices[i]?.percent || 0}%)`}</title>
+                  </path>
+                ))}
+              </g>
+              <text
+                x={cx}
+                y={cy - 5}
+                textAnchor="middle"
+                className="text-slate-900 dark:text-white"
+                fill="currentColor"
+                fontSize="22"
+                fontWeight="900"
+              >
+                {totalSalesCount}
+              </text>
+              <text
+                x={cx}
+                y={cy + 13}
+                textAnchor="middle"
+                fill="#94a3b8"
+                fontSize="9"
+                fontWeight="700"
+                letterSpacing="1"
+              >
+                SALES
+              </text>
+            </svg>
+          </div>
+
+          {/* Breakdown List */}
+          <div className="flex-1 w-full space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
+            {slices.map((slice, i) => (
+              <div key={i} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 truncate">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: slice.color }}
+                  />
+                  <span className="font-medium text-slate-700 dark:text-slate-300 truncate">
+                    {slice.name}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 font-mono ml-2 flex-shrink-0">
+                  <span className="font-bold text-slate-900 dark:text-white">{slice.count}</span>
+                  <span className="text-slate-400 text-[11px]">({slice.percent}%)</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sales Analytics Spline / Area Chart Component (Matching reference image)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ChartPeriod = 'Today' | 'Week' | 'Month';
+
+interface RevenueChartProps {
+  trendToday: TrendPoint[];
+  trendWeek: TrendPoint[];
+  trendMonth: TrendPoint[];
+  loading: boolean;
+}
+
+const RevenueChart: React.FC<RevenueChartProps> = ({
+  trendToday,
+  trendWeek,
+  trendMonth,
+  loading,
+}) => {
+  const [period, setPeriod] = useState<ChartPeriod>('Week');
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  const activePoints: TrendPoint[] = useMemo(() => {
+    if (period === 'Today') return trendToday;
+    if (period === 'Week') return trendWeek;
+    return trendMonth;
+  }, [period, trendToday, trendWeek, trendMonth]);
+
+  const W = 580;
+  const H = 160;
+  const { line, area, coords } = useMemo(
+    () => buildSmoothSplinePath(activePoints, W, H, 14),
+    [activePoints, W, H]
+  );
+
+  const maxRevenue = Math.max(...activePoints.map((p) => p.revenue || 0), 0);
+  const yTicks = [
+    maxRevenue,
+    Math.round(maxRevenue * 0.66),
+    Math.round(maxRevenue * 0.33),
+    0,
+  ];
+
+  const totalPeriodRevenue = activePoints.reduce((acc, p) => acc + (p.revenue || 0), 0);
+
+  return (
+    <div className="bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-2xl p-6 shadow-sm flex flex-col justify-between h-full">
+      {/* Card Header & Controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            Sales Analytics
+            <span className="text-xs font-normal text-slate-400">
+              ({fmtRs(totalPeriodRevenue)})
+            </span>
+          </h3>
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            Revenue trends for {period === 'Today' ? 'today' : period === 'Week' ? 'last 7 days' : 'last 30 days'}
+          </p>
+        </div>
+
+        {/* Period Switcher Tabs */}
+        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit">
+          {(['Today', 'Week', 'Month'] as ChartPeriod[]).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => {
+                setPeriod(tab);
+                setHoveredIdx(null);
+              }}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                period === tab
+                  ? 'bg-white dark:bg-dark-card text-brand-500 shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {tab === 'Today' ? 'Today' : tab === 'Week' ? 'This Week' : 'This Month'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* SVG Spline Canvas */}
+      {loading ? (
+        <Skeleton className="h-44 w-full rounded-xl my-2" />
+      ) : (
+        <div className="relative w-full overflow-hidden pt-2">
+          {/* Active Tooltip Badge (Matching the reference image floating pill) */}
+          {hoveredIdx !== null && coords[hoveredIdx] && (
+            <div
+              className="absolute z-20 pointer-events-none transform -translate-x-1/2 -translate-y-full transition-all duration-150"
+              style={{
+                left: `${(coords[hoveredIdx].x / W) * 100}%`,
+                top: `${(coords[hoveredIdx].y / (H + 24)) * 100 - 8}%`,
+              }}
+            >
+              <div className="bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-2.5 py-1 rounded-lg shadow-xl text-[11px] font-bold flex items-center gap-1.5 whitespace-nowrap">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>{fmtRs(coords[hoveredIdx].revenue)}</span>
+                <span className="opacity-70 text-[10px]">({coords[hoveredIdx].label})</span>
+              </div>
+            </div>
+          )}
+
+          <svg
+            viewBox={`0 0 ${W} ${H + 26}`}
+            className="w-full h-44 overflow-visible"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#6366f1" stopOpacity="0.28" />
+                <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
+              </linearGradient>
+            </defs>
+
+            {/* Horizontal Dashed Guidelines */}
+            {yTicks.map((tick, i) => {
+              const y =
+                maxRevenue === 0
+                  ? H - 14 - (i / 3) * (H - 28)
+                  : H - 14 - (tick / maxRevenue) * (H - 28);
+              return (
+                <g key={i}>
+                  <line
+                    x1="0"
+                    y1={y}
+                    x2={W}
+                    y2={y}
+                    stroke="currentColor"
+                    className="text-slate-100 dark:text-slate-800/80"
+                    strokeDasharray="4 4"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x="2"
+                    y={y - 4}
+                    fill="#94a3b8"
+                    fontSize="8"
+                    fontWeight="600"
+                    className="select-none"
+                  >
+                    {tick >= 1000 ? `${(tick / 1000).toFixed(0)}k` : tick}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Area Fill */}
+            <path d={area} fill="url(#areaGradient)" />
+
+            {/* Spline Line */}
+            <path
+              d={line}
+              fill="none"
+              stroke="#6366f1"
+              strokeWidth="2.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+
+            {/* Node Points & Hover Areas */}
+            {coords.map((pt, i) => (
+              <g
+                key={i}
+                className="cursor-pointer"
+                onMouseEnter={() => setHoveredIdx(i)}
+                onMouseLeave={() => setHoveredIdx(null)}
+              >
+                {/* Invisible larger hover zone */}
+                <circle cx={pt.x} cy={pt.y} r="14" fill="transparent" />
+
+                {/* Point ring */}
+                <circle
+                  cx={pt.x}
+                  cy={pt.y}
+                  r={hoveredIdx === i ? '5' : '3.5'}
+                  fill="white"
+                  stroke="#6366f1"
+                  strokeWidth={hoveredIdx === i ? '3' : '2'}
+                  className="transition-all dark:fill-dark-card"
+                />
+
+                {/* X-axis Label */}
+                <text
+                  x={pt.x}
+                  y={H + 18}
+                  textAnchor="middle"
+                  fill={hoveredIdx === i ? '#6366f1' : '#94a3b8'}
+                  fontSize="8.5"
+                  fontWeight={hoveredIdx === i ? 'bold' : '500'}
+                  className="select-none"
+                >
+                  {pt.label}
+                </text>
+              </g>
+            ))}
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Status Badge Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+const StatusBadge: React.FC<{ status?: string }> = ({ status }) => {
+  const s = (status || '').toLowerCase();
+  if (s === 'completed' || s === 'paid') {
+    return (
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40">
+        Paid
+      </span>
+    );
+  }
+  if (s === 'pending') {
+    return (
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/40">
+        Pending
+      </span>
+    );
+  }
+  if (s === 'refunded') {
+    return (
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800/40">
+        Refunded
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+      {status || 'Completed'}
+    </span>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Dashboard View Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DashboardView: React.FC<DashboardViewProps> = ({
+  setActiveTab,
+  onOpenImeiSearch,
+}) => {
+  const { products, sales, repairs, customers, currentTradeIn, setTradeIn, setLastCompletedSale, showNotification } = useStore();
   const { currentUser } = useAuth();
 
-  const [chartTimeframe, setChartTimeframe] = useState<'Today' | '7D' | '30D' | 'Month'>('7D');
-  const [activeChartTab, setActiveChartTab] = useState<'revenue' | 'profit' | 'expenses' | 'category' | 'payments'>('revenue');
-  const [mobileTimeframe, setMobileTimeframe] = useState<'Today' | '7D' | '30D' | 'All'>('Today');
-  const [isReceiptOpen, setIsReceiptOpen] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Modals
+  const [isTradeInModalOpen, setIsTradeInModalOpen] = useState(false);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+
+  // Live Sri Lanka Clock (Asia/Colombo)
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // KPI calculations
-  const todayStr = new Date().toISOString().substring(0, 10);
-  const todaySalesList = sales.filter(s => s.date === todayStr);
-  const todaySalesTotal = todaySalesList.reduce((acc, s) => acc + s.totalAmount, 0);
-  const todayProfitTotal = todaySalesList.reduce((acc, s) => acc + s.profitTotal, 0);
+  const formattedDate = useMemo(() => {
+    return currentTime.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'Asia/Colombo',
+    });
+  }, [currentTime]);
+
+  const formattedTime = useMemo(() => {
+    return currentTime.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Colombo',
+    });
+  }, [currentTime]);
+
+  // Global Keyboard Shortcuts on Dashboard: F2, F4, F7
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // If modal or input has focus, ignore
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+
+      if (e.key === 'F2') {
+        e.preventDefault();
+        setActiveTab('pos');
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        onOpenImeiSearch();
+      } else if (e.key === 'F7') {
+        e.preventDefault();
+        setIsTradeInModalOpen(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [setActiveTab, onOpenImeiSearch]);
+
+  // ── Compute Real-time Dashboard Data ──────────────────────────────────────
+  const loadData = useCallback(() => {
+    const todayStr = new Date().toISOString().substring(0, 10);
+    const yd = new Date();
+    yd.setDate(yd.getDate() - 1);
+    const yesterdayStr = yd.toISOString().substring(0, 10);
+
+    const todaySales = sales.filter((s) => s.date === todayStr);
+    const yesterdaySales = sales.filter((s) => s.date === yesterdayStr);
+
+    const todayRevenue = todaySales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+    const yesterdayRevenue = yesterdaySales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+    const todayOrders = todaySales.length;
+
+    // Active Inventory Devices in stock
+    const inventoryCount = products.reduce((acc, p) => acc + (p.currentStock || 0), 0);
+
+    // Pending Repairs count
+    const pendingRepairs = repairs.filter(
+      (r) =>
+        r.status === 'Received' ||
+        r.status === 'Diagnostics' ||
+        r.status === 'Repairing' ||
+        r.status === 'Waiting for Parts' ||
+        r.status === 'RECEIVED' ||
+        r.status === 'DIAGNOSING' ||
+        r.status === 'IN_PROGRESS' ||
+        r.status === 'WAITING_PARTS'
+    ).length;
+
+    // Trade-In Units: items tagged as trade-ins or in pre-owned stock, plus active cart trade-in
+    const tradeInUnitsFromStock = products.reduce((acc, p) => {
+      const itemsCount = (p.imeis || []).filter((item) => item.isTradeIn).length;
+      return acc + itemsCount;
+    }, 0);
+    const tradeInCount = tradeInUnitsFromStock + (currentTradeIn ? 1 : 0);
+
+    // Low stock products count
+    const lowStockCount = products.filter(
+      (p) => (p.currentStock || 0) <= (p.minStock ?? 2)
+    ).length;
+
+    // Sales by Category
+    const catMap: Record<string, number> = {};
+    sales.forEach((sale) => {
+      sale.items.forEach((item) => {
+        const prod = products.find((p) => p.id === item.productId);
+        const cat = prod?.category || 'Other';
+        catMap[cat] = (catMap[cat] || 0) + (item.quantity || 1);
+      });
+    });
+
+    const totalCatCount = Object.values(catMap).reduce((a, b) => a + b, 0) || 1;
+    const salesByCategory: CategorySlice[] = Object.entries(catMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name, count], i) => ({
+        name,
+        count,
+        percent: Math.round((count / totalCatCount) * 100),
+        color: CATEGORY_COLORS[name] || PALETTE[i % PALETTE.length],
+      }));
+
+    // Trend: Today (hourly slots)
+    const todayHours = ['08h', '10h', '12h', '14h', '16h', '18h', '20h'];
+    const trendToday: TrendPoint[] = todayHours.map((label, i) => {
+      const hourVal = todaySales
+        .filter((s) => {
+          const h = parseInt((s.time || '00:00').split(':')[0], 10);
+          return h >= 8 + i * 2 && h < 10 + i * 2;
+        })
+        .reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+      return { label, revenue: hourVal };
+    });
+
+    // Trend: Week (last 7 days)
+    const trendWeek: TrendPoint[] = Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      const ds = d.toISOString().substring(0, 10);
+      const label = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const revenue = sales
+        .filter((s) => s.date === ds)
+        .reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+      return { label, revenue };
+    });
+
+    // Trend: Month (last 4 weeks)
+    const trendMonth: TrendPoint[] = Array.from({ length: 4 }).map((_, i) => {
+      const start = new Date();
+      start.setDate(start.getDate() - (3 - i) * 7 - 6);
+      const end = new Date();
+      end.setDate(end.getDate() - (3 - i) * 7);
+      const startStr = start.toISOString().substring(0, 10);
+      const endStr = end.toISOString().substring(0, 10);
+      const revenue = sales
+        .filter((s) => s.date >= startStr && s.date <= endStr)
+        .reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+      return { label: `Wk ${i + 1}`, revenue };
+    });
+
+    // Recent 5 sales
+    const recentSales = [...sales]
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      .slice(0, 6);
+
+    setData({
+      todayRevenue,
+      todayOrders,
+      inventoryCount,
+      pendingRepairs,
+      tradeInCount,
+      lowStockCount,
+      yesterdayRevenue,
+      salesByCategory,
+      trendToday,
+      trendWeek,
+      trendMonth,
+      recentSales,
+    });
+    setLoading(false);
+  }, [sales, products, repairs, currentTradeIn]);
+
+  useEffect(() => {
+    loadData();
+    const interval = setInterval(loadData, 20_000);
+    return () => clearInterval(interval);
+  }, [loadData]);
+
+  // Derived Trend
+  const todayRev = data?.todayRevenue || 0;
+  const yestRev = data?.yesterdayRevenue || 0;
+  const revTrend = trendPct(todayRev, yestRev);
+
+  const userName = currentUser?.name || currentUser?.full_name || 'Surinda';
+
+  // Receipt preview handler
+  const handleOpenReceipt = (sale: Sale) => {
+    setLastCompletedSale(sale);
+    setIsReceiptModalOpen(true);
+  };
+
+  // Trade-In Apply handler
+  const handleApplyTradeIn = (record: TradeInRecord) => {
+    setTradeIn(record);
+    setIsTradeInModalOpen(false);
+    showNotification('success', `Trade-In registered for ${record.inspection.model}! Added to POS cart.`);
+    setActiveTab('pos');
+  };
+
+
+  // ── Mobile Specific Derived Metrics ─────────────────────────────────────
+  const [mobileTimeframe, setMobileTimeframe] = useState<'Today' | '7D' | '30D' | 'All'>('Today');
+
+  const todaySalesTotal = data?.todayRevenue || 0;
+  const todaySalesList = useMemo(() => {
+    const todayStr = new Date().toISOString().substring(0, 10);
+    return sales.filter(s => s.date === todayStr);
+  }, [sales]);
+  const todayProfitTotal = useMemo(() => todaySalesList.reduce((acc, s) => acc + (s.profitTotal || 0), 0), [todaySalesList]);
   const todayMarginPct = todaySalesTotal > 0 ? Math.round((todayProfitTotal / todaySalesTotal) * 100) : 0;
-  const todayTxCount = todaySalesList.length;
+  const todayTxCount = data?.todayOrders || 0;
   const todayAvgTicket = todayTxCount > 0 ? Math.round(todaySalesTotal / todayTxCount) : 0;
 
   const filteredSales = useMemo(() => {
+    const todayStr = new Date().toISOString().substring(0, 10);
     if (mobileTimeframe === 'Today') {
       return sales.filter(s => s.date === todayStr);
     }
@@ -85,72 +957,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ setActiveTab, onOp
       return sales.filter(s => s.date >= cutoff);
     }
     return sales;
-  }, [sales, mobileTimeframe, todayStr]);
+  }, [sales, mobileTimeframe]);
 
-  const handleOpenReceipt = (sale: Sale) => {
-    setLastCompletedSale(sale);
-    setIsReceiptOpen(true);
-  };
-
-  const totalStockUnits = products.reduce((acc, p) => acc + p.currentStock, 0);
-  const lowStockProducts = products.filter(p => p.currentStock <= p.minStock);
-  const totalStockCost = products.reduce((acc, p) => acc + p.costPrice * p.currentStock, 0);
-  const totalStockRetail = products.reduce((acc, p) => acc + p.sellingPrice * p.currentStock, 0);
-
-  const monthlySalesTotal = sales.reduce((acc, s) => acc + s.totalAmount, 0);
-  const totalOutstandingCredit = customers.reduce((acc, c) => acc + c.creditBalance, 0);
-
-  // Category breakdown
-  const categoryCounts: Record<string, number> = {};
-  sales.forEach(sale => {
-    sale.items.forEach(item => {
-      const prod = products.find(p => p.id === item.productId);
-      const cat = prod?.category || 'iPhones';
-      categoryCounts[cat] = (categoryCounts[cat] || 0) + item.lineTotal;
-    });
-  });
-
-  const categoryTotals = Object.entries(categoryCounts).map(([cat, total]) => ({
-    name: cat,
-    total,
-    percent: monthlySalesTotal > 0 ? Math.round((total / monthlySalesTotal) * 100) : 0,
-  }));
-
-  // Payment methods breakdown
-  const paymentTotals: Record<string, number> = {
-    Cash: 0,
-    Card: 0,
-    'Bank Transfer': 0,
-    'Customer Credit': 0,
-    Split: 0,
-  };
-  sales.forEach(s => {
-    paymentTotals[s.paymentMethod] = (paymentTotals[s.paymentMethod] || 0) + s.totalAmount;
-  });
-
-  // Chart data points (Simulated based on timeframe)
-  const chartDays = chartTimeframe === 'Today' ? ['09:00', '11:00', '13:00', '15:00', '17:00', '19:00', '21:00']
-    : chartTimeframe === '7D' ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    : ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-
-  const revenueSeries = chartTimeframe === 'Today'
-    ? [25000, 391500, 86500, 120000, 45000, 75000, 30000]
-    : chartTimeframe === '7D'
-    ? [310000, 485000, 290000, 640000, 520000, 890000, 652000]
-    : [1850000, 2400000, 2150000, 2950000];
-
-  const expenseSeries = chartTimeframe === 'Today'
-    ? [5000, 1500, 2800, 0, 1200, 800, 0]
-    : chartTimeframe === '7D'
-    ? [25000, 32000, 18000, 120000, 15000, 42000, 28000]
-    : [180000, 210000, 290000, 240000];
-
-  const profitSeries = revenueSeries.map((r, i) => Math.max(0, Math.round(r * 0.14)));
-
-  const maxRevenue = Math.max(...revenueSeries, 1);
+  const totalStockUnits = data?.inventoryCount || 0;
+  const totalStockRetail = useMemo(() => products.reduce((acc, p) => acc + ((p.sellingPrice || 0) * (p.currentStock || 0)), 0), [products]);
+  const lowStockProducts = useMemo(() => products.filter(p => (p.currentStock || 0) <= (p.minStock ?? 2)), [products]);
+  const activeTradeInCount = data?.tradeInCount || 0;
+  const totalOutstandingCredit = useMemo(() => (customers || []).reduce((acc, c) => acc + (c.creditBalance || 0), 0), [customers]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20 md:pb-8">
+      {/* ======================================================== */}
       {/* ======================================================== */}
       {/* ULTRA-PREMIUM APPLE IPHONE MATCHING AESTHETIC MOBILE VIEW */}
       {/* ======================================================== */}
@@ -616,566 +1433,440 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ setActiveTab, onOp
       </div>
 
       {/* ======================================================== */}
-      {/* PRESERVED DESKTOP DASHBOARD VIEW (hidden on mobile)      */}
+      {/* DESKTOP VIEW (AppleVision Flagship POS Dashboard)        */}
       {/* ======================================================== */}
       <div className="hidden md:block space-y-6">
-        {/* Top Hero Section */}
-      <div className="relative rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-slate-700/60 p-6 shadow-xl overflow-hidden select-none">
-        <div className="absolute right-0 top-0 w-96 h-full bg-brand-500/10 blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-brand-400 uppercase tracking-widest">
-                Flagship POS Dashboard
-              </span>
-              <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />
-              <span className="text-xs text-slate-400 font-medium">Kalegana Junction, Galle</span>
-            </div>
-            <h1 className="text-2xl font-black text-white tracking-tight mt-1">
-              Welcome back, {currentUser?.name || 'Surinda'}
+      {/* ── HEADER WITH LIVE SRI LANKA TICKER & SHORTCUT ACTIONS ─────────── */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-2xl p-5 shadow-sm">
+        {/* Left: User Welcome & Store Subtitle */}
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+              Welcome Back, {userName} 👋
             </h1>
-            <p className="text-xs text-slate-300 mt-1 max-w-xl">
-              High-speed retail intelligence for genuine Apple devices, serialized device tracking, and instant customer checkout.
-            </p>
+            <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-brand-50 text-brand-600 dark:bg-brand-950/40 dark:text-brand-400">
+              Store Owner
+            </span>
           </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            AppleVision Store Galle · Kalegana Junction, Galle
+          </p>
+        </div>
 
-          {/* Quick Actions Bar */}
-          <div className="flex flex-wrap items-center gap-2.5">
+        {/* Center: Live Sri Lanka Clock Ticker */}
+        <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 w-fit">
+          <div className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+          </div>
+          <div className="text-xs">
+            <div className="font-mono font-bold text-slate-900 dark:text-white tracking-tight">
+              {formattedTime}
+            </div>
+            <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+              {formattedDate} (Asia/Colombo)
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Quick Action Buttons with Keyboard Badge */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* New Sale F2 */}
+          <button
+            onClick={() => setActiveTab('pos')}
+            className="px-3.5 py-2 rounded-xl text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-brand-500/20 hover:brightness-110 active:scale-95 transition-all"
+            style={{ backgroundColor: BRAND_RED }}
+            title="Press F2 to open POS"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>New Sale</span>
+            <kbd className="ml-1 bg-white/20 text-white px-1.5 py-0.2 rounded text-[10px] font-mono">
+              F2
+            </kbd>
+          </button>
+
+          {/* Intake Trade-In F7 */}
+          <button
+            onClick={() => setIsTradeInModalOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 hover:bg-purple-100 text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95"
+            title="Press F7 to intake trade-in device"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Intake Trade-In</span>
+            <kbd className="ml-1 bg-purple-200/50 dark:bg-purple-900/60 px-1.5 py-0.2 rounded text-[10px] font-mono">
+              F7
+            </kbd>
+          </button>
+
+          {/* New Repair */}
+          <button
+            onClick={() => setActiveTab('repairs')}
+            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all"
+          >
+            <Wrench className="w-3.5 h-3.5 text-amber-500" />
+            <span>New Repair</span>
+          </button>
+
+          {/* Scan IMEI F4 */}
+          <button
+            onClick={onOpenImeiSearch}
+            className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-card text-slate-700 dark:text-slate-200 hover:border-slate-400 text-xs font-bold flex items-center gap-1.5 transition-all"
+            title="Press F4 to search IMEI / Serial"
+          >
+            <Search className="w-3.5 h-3.5 text-blue-500" />
+            <span>Scan IMEI</span>
+            <kbd className="ml-1 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded text-[10px] font-mono">
+              F4
+            </kbd>
+          </button>
+        </div>
+      </div>
+
+      {/* ── 5 KPI STAT CARDS ROW (MATCHING REFERENCE IMAGE) ───────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* Card 1: Today's Sales */}
+        <KpiCard
+          title="Today's Sales"
+          value={fmtRs(todayRev)}
+          trendText={`+${revTrend.pct}%`}
+          trendSubtext="vs Yesterday"
+          isUp={revTrend.up}
+          accentBarColor="bg-rose-500"
+          badgeBg="bg-rose-50 dark:bg-rose-950/40"
+          badgeTextColor="text-rose-500"
+          icon={<DollarSign className="w-5 h-5" />}
+          loading={loading}
+        />
+
+        {/* Card 2: Today's Orders */}
+        <KpiCard
+          title="Today's Orders"
+          value={`${data?.todayOrders || 0}`}
+          trendText={`${data?.todayOrders || 0}`}
+          trendSubtext="Invoices today"
+          isUp={true}
+          accentBarColor="bg-blue-500"
+          badgeBg="bg-blue-50 dark:bg-blue-950/40"
+          badgeTextColor="text-blue-500"
+          icon={<Receipt className="w-5 h-5" />}
+          loading={loading}
+        />
+
+        {/* Card 3: Active Inventory */}
+        <KpiCard
+          title="Active Inventory"
+          value={`${data?.inventoryCount || 0} Devices`}
+          trendText={`${products.length} models`}
+          trendSubtext="Units in stock"
+          isUp={true}
+          accentBarColor="bg-emerald-500"
+          badgeBg="bg-emerald-50 dark:bg-emerald-950/40"
+          badgeTextColor="text-emerald-500"
+          icon={<Smartphone className="w-5 h-5" />}
+          loading={loading}
+        />
+
+        {/* Card 4: Pending Repairs */}
+        <KpiCard
+          title="Pending Repairs"
+          value={`${data?.pendingRepairs || 0}`}
+          trendText={`${data?.pendingRepairs || 0} active`}
+          trendSubtext="Awaiting work"
+          isUp={false}
+          accentBarColor="bg-amber-500"
+          badgeBg="bg-amber-50 dark:bg-amber-950/40"
+          badgeTextColor="text-amber-500"
+          icon={<Wrench className="w-5 h-5" />}
+          loading={loading}
+        />
+
+        {/* Card 5: Trade-In Units */}
+        <KpiCard
+          title="Trade-In Units"
+          value={`${data?.tradeInCount || 0} Units`}
+          trendText="Pre-Owned"
+          trendSubtext="Graded & Intake"
+          isUp={true}
+          accentBarColor="bg-purple-500"
+          badgeBg="bg-purple-50 dark:bg-purple-950/40"
+          badgeTextColor="text-purple-500"
+          icon={<RotateCcw className="w-5 h-5" />}
+          loading={loading}
+        />
+      </div>
+
+      {/* ── QUICK STAT WIDGETS ROW ────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Low Stock Widget */}
+        <div className="bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-2xl p-4 shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                (data?.lowStockCount || 0) > 0
+                  ? 'bg-amber-100 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400'
+                  : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400'
+              }`}
+            >
+              {(data?.lowStockCount || 0) > 0 ? (
+                <AlertTriangle className="w-5 h-5" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5" />
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-900 dark:text-white">
+                {(data?.lowStockCount || 0) > 0
+                  ? `${data?.lowStockCount} Products Running Low`
+                  : 'Stock Levels Healthy'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {(data?.lowStockCount || 0) > 0
+                  ? 'Items reached or below minimum reorder thresholds'
+                  : 'All inventory models have sufficient reserve stock'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('inventory')}
+            className="text-xs font-bold text-brand-500 hover:text-brand-600 flex items-center gap-1 group"
+          >
+            <span>Review Stock</span>
+            <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+          </button>
+        </div>
+
+        {/* Trade-Ins Intake Widget */}
+        <div className="bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-2xl p-4 shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-600 dark:bg-purple-950/50 dark:text-purple-400 flex items-center justify-center">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-900 dark:text-white">
+                {(data?.tradeInCount || 0) > 0
+                  ? `${data?.tradeInCount} Trade-In Units in Workflow`
+                  : 'Apple Trade-In Program Ready'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Automated 12-point hardware grading & instant valuation
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsTradeInModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-xs font-bold flex items-center gap-1 transition-all"
+          >
+            <span>+ Intake Device</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── ANALYTICS ROW (DONUT + SPLINE CHART) ──────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-stretch">
+        {/* Left: Donut Chart (2 cols) */}
+        <div className="lg:col-span-2">
+          <DonutChart
+            slices={data?.salesByCategory || []}
+            totalSalesCount={data?.recentSales?.length || 0}
+            loading={loading}
+          />
+        </div>
+
+        {/* Right: Spline Revenue Chart (3 cols) */}
+        <div className="lg:col-span-3">
+          <RevenueChart
+            trendToday={data?.trendToday || []}
+            trendWeek={data?.trendWeek || []}
+            trendMonth={data?.trendMonth || []}
+            loading={loading}
+          />
+        </div>
+      </div>
+
+      {/* ── RECENT INVOICES TABLE (MATCHING REFERENCE IMAGE) ───────────────── */}
+      <div className="bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-2xl shadow-sm overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-light-border dark:border-dark-border">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Recent Invoices</h3>
+            <p className="text-xs text-slate-400">Latest transactions from customer checkouts</p>
+          </div>
+          <button
+            onClick={() => setActiveTab('reports')}
+            className="text-xs font-bold text-brand-500 hover:text-brand-600 transition-colors flex items-center gap-1 group"
+          >
+            <span>View All Reports</span>
+            <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        {loading ? (
+          <div className="p-6 space-y-3">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : !data?.recentSales || data.recentSales.length === 0 ? (
+          /* Empty State (Clean zero data presentation) */
+          <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-3">
+              <Receipt className="w-8 h-8 opacity-60" />
+            </div>
+            <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-1">
+              No transactions yet
+            </h4>
+            <p className="text-xs text-slate-400 max-w-sm mb-4">
+              Your store is clean and ready for production. Press{' '}
+              <kbd className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">
+                F2
+              </kbd>{' '}
+              or click New Sale above to start your first checkout.
+            </p>
             <button
               onClick={() => setActiveTab('pos')}
-              className="px-4 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-brand-500/25 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
+              className="px-4 py-2 rounded-xl text-white text-xs font-bold shadow-md hover:brightness-110 active:scale-95 transition-all flex items-center gap-1.5"
+              style={{ backgroundColor: BRAND_RED }}
             >
-              <PlusCircle className="w-4 h-4" />
-              <span>+ NEW SALE (F2)</span>
-            </button>
-
-            <button
-              onClick={onOpenImeiSearch}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
-            >
-              <Barcode className="w-4 h-4 text-brand-400" />
-              <span>SCAN IMEI (F4)</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('inventory')}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
-            >
-              <PackagePlus className="w-4 h-4 text-emerald-400" />
-              <span>ADD STOCK</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('purchases')}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
-            >
-              <Truck className="w-4 h-4 text-blue-400" />
-              <span>PURCHASE</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('expenses')}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
-            >
-              <Wallet className="w-4 h-4 text-amber-400" />
-              <span>EXPENSE</span>
+              <Plus className="w-4 h-4" />
+              <span>Start First Sale (F2)</span>
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* 8 KPI Cards Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-        {/* 1. Today's Sales */}
-        <div className="p-3.5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-light-muted dark:text-dark-muted">
-            <span className="text-[10px] font-bold uppercase tracking-wider">Today's Sales</span>
-            <DollarSign className="w-4 h-4 text-brand-500" />
-          </div>
-          <div className="mt-2">
-            <div className="font-mono font-black text-sm text-slate-900 dark:text-white truncate">
-              LKR {todaySalesTotal.toLocaleString()}
-            </div>
-            <div className="text-[10px] font-semibold text-emerald-500 flex items-center gap-0.5 mt-0.5">
-              <ArrowUpRight className="w-3 h-3" />
-              <span>+18.4% vs y'day</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. Today's Profit */}
-        <div className="p-3.5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-light-muted dark:text-dark-muted">
-            <span className="text-[10px] font-bold uppercase tracking-wider">Today's Profit</span>
-            <TrendingUp className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="mt-2">
-            <div className="font-mono font-black text-sm text-slate-900 dark:text-white truncate">
-              LKR {todayProfitTotal.toLocaleString()}
-            </div>
-            <div className="text-[10px] font-semibold text-emerald-500 mt-0.5">
-              Margin: {todayMarginPct}%
-            </div>
-          </div>
-        </div>
-
-        {/* 3. Transactions */}
-        <div className="p-3.5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-light-muted dark:text-dark-muted">
-            <span className="text-[10px] font-bold uppercase tracking-wider">Invoices</span>
-            <Receipt className="w-4 h-4 text-blue-400" />
-          </div>
-          <div className="mt-2">
-            <div className="font-mono font-black text-sm text-slate-900 dark:text-white">
-              {todayTxCount} Orders
-            </div>
-            <div className="text-[10px] text-light-muted dark:text-dark-muted truncate mt-0.5">
-              Avg: LKR {todayAvgTicket.toLocaleString()}
-            </div>
-          </div>
-        </div>
-
-        {/* 4. Available Devices */}
-        <div className="p-3.5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-light-muted dark:text-dark-muted">
-            <span className="text-[10px] font-bold uppercase tracking-wider">Devices</span>
-            <Smartphone className="w-4 h-4 text-purple-400" />
-          </div>
-          <div className="mt-2">
-            <div className="font-mono font-black text-sm text-slate-900 dark:text-white">
-              {totalStockUnits} Units
-            </div>
-            <div className="text-[10px] text-light-muted dark:text-dark-muted mt-0.5">
-              Across 13 items
-            </div>
-          </div>
-        </div>
-
-        {/* 5. Low Stock */}
-        <div className={`p-3.5 rounded-2xl bg-white dark:bg-dark-card border shadow-sm flex flex-col justify-between ${
-          lowStockProducts.length > 0 ? 'border-amber-500/40 bg-amber-500/5' : 'border-light-border dark:border-dark-border'
-        }`}>
-          <div className="flex items-center justify-between text-light-muted dark:text-dark-muted">
-            <span className="text-[10px] font-bold uppercase tracking-wider">Low Stock</span>
-            <AlertTriangle className={`w-4 h-4 ${lowStockProducts.length > 0 ? 'text-amber-500' : 'text-slate-400'}`} />
-          </div>
-          <div className="mt-2">
-            <div className="font-mono font-black text-sm text-amber-500">
-              {lowStockProducts.length} Items
-            </div>
-            <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold mt-0.5">
-              Needs reorder
-            </div>
-          </div>
-        </div>
-
-        {/* 6. Stock Value */}
-        <div className="p-3.5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-light-muted dark:text-dark-muted">
-            <span className="text-[10px] font-bold uppercase tracking-wider">Stock Value</span>
-            <BarChart3 className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="mt-2">
-            <div className="font-mono font-black text-sm text-slate-900 dark:text-white truncate">
-              {(totalStockCost / 1000000).toFixed(2)}M LKR
-            </div>
-            <div className="text-[10px] text-light-muted dark:text-dark-muted truncate mt-0.5">
-              Retail: {(totalStockRetail / 1000000).toFixed(2)}M
-            </div>
-          </div>
-        </div>
-
-        {/* 7. Monthly Revenue */}
-        <div className="p-3.5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-light-muted dark:text-dark-muted">
-            <span className="text-[10px] font-bold uppercase tracking-wider">Month Rev</span>
-            <TrendingUp className="w-4 h-4 text-brand-500" />
-          </div>
-          <div className="mt-2">
-            <div className="font-mono font-black text-sm text-slate-900 dark:text-white truncate">
-              {(monthlySalesTotal / 1000000).toFixed(2)}M
-            </div>
-            <div className="text-[10px] text-emerald-500 font-semibold mt-0.5">
-              Target: 5.0M LKR
-            </div>
-          </div>
-        </div>
-
-        {/* 8. Outstanding Credit */}
-        <div className="p-3.5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-light-muted dark:text-dark-muted">
-            <span className="text-[10px] font-bold uppercase tracking-wider">Cust. Credit</span>
-            <CreditCard className="w-4 h-4 text-rose-500" />
-          </div>
-          <div className="mt-2">
-            <div className="font-mono font-black text-sm text-rose-500 truncate">
-              LKR {totalOutstandingCredit.toLocaleString()}
-            </div>
-            <div className="text-[10px] text-light-muted dark:text-dark-muted mt-0.5">
-              Unsettled ledger
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Interactive Charts & Analytics Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Main Responsive Chart */}
-        <div className="lg:col-span-2 p-5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            {/* Chart mode tabs */}
-            <div className="flex items-center gap-1 p-1 bg-light-surface dark:bg-dark-surface rounded-xl border border-light-border dark:border-dark-border text-xs">
-              <button
-                onClick={() => setActiveChartTab('revenue')}
-                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                  activeChartTab === 'revenue'
-                    ? 'bg-brand-500 text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                Revenue Overview
-              </button>
-              <button
-                onClick={() => setActiveChartTab('profit')}
-                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                  activeChartTab === 'profit'
-                    ? 'bg-brand-500 text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                Gross Profit
-              </button>
-              <button
-                onClick={() => setActiveChartTab('expenses')}
-                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                  activeChartTab === 'expenses'
-                    ? 'bg-brand-500 text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                Rev vs Expenses
-              </button>
-            </div>
-
-            {/* Timeframe pill selector */}
-            <div className="flex items-center gap-1 text-xs">
-              {(['Today', '7D', '30D', 'Month'] as const).map(tf => (
-                <button
-                  key={tf}
-                  onClick={() => setChartTimeframe(tf)}
-                  className={`px-2.5 py-1 rounded-lg font-semibold transition-colors ${
-                    chartTimeframe === tf
-                      ? 'bg-light-elevated dark:bg-dark-elevated text-brand-500 border border-brand-500/30'
-                      : 'text-light-muted dark:text-dark-muted hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  {tf}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* SVG Chart Rendering */}
-          <div className="h-64 w-full relative pt-4">
-            <svg className="w-full h-full overflow-visible" viewBox="0 0 600 200" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#e61e25" stopOpacity="0.35" />
-                  <stop offset="100%" stopColor="#e61e25" stopOpacity="0.0" />
-                </linearGradient>
-                <linearGradient id="profitGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#10b981" stopOpacity="0.35" />
-                  <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
-                </linearGradient>
-              </defs>
-
-              {/* Grid Lines */}
-              {[0, 50, 100, 150].map((y) => (
-                <line
-                  key={y}
-                  x1="0"
-                  y1={y}
-                  x2="600"
-                  y2={y}
-                  stroke="currentColor"
-                  className="text-slate-200 dark:text-slate-800"
-                  strokeDasharray="4 4"
-                  strokeWidth="1"
-                />
-              ))}
-
-              {/* Render Area/Line based on tab */}
-              {activeChartTab === 'revenue' && (
-                <>
-                  <polygon
-                    points={`0,200 ${revenueSeries.map((val, idx) => `${(idx / (revenueSeries.length - 1)) * 600},${200 - (val / maxRevenue) * 170}`).join(' ')} 600,200`}
-                    fill="url(#revenueGrad)"
-                  />
-                  <polyline
-                    points={revenueSeries.map((val, idx) => `${(idx / (revenueSeries.length - 1)) * 600},${200 - (val / maxRevenue) * 170}`).join(' ')}
-                    fill="none"
-                    stroke="#e61e25"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  {revenueSeries.map((val, idx) => (
-                    <circle
-                      key={idx}
-                      cx={(idx / (revenueSeries.length - 1)) * 600}
-                      cy={200 - (val / maxRevenue) * 170}
-                      r="4.5"
-                      className="fill-white dark:fill-dark-card stroke-brand-500"
-                      strokeWidth="2.5"
-                    />
-                  ))}
-                </>
-              )}
-
-              {activeChartTab === 'profit' && (
-                <>
-                  <polygon
-                    points={`0,200 ${profitSeries.map((val, idx) => `${(idx / (profitSeries.length - 1)) * 600},${200 - (val / (maxRevenue * 0.2)) * 170}`).join(' ')} 600,200`}
-                    fill="url(#profitGrad)"
-                  />
-                  <polyline
-                    points={profitSeries.map((val, idx) => `${(idx / (profitSeries.length - 1)) * 600},${200 - (val / (maxRevenue * 0.2)) * 170}`).join(' ')}
-                    fill="none"
-                    stroke="#10b981"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  {profitSeries.map((val, idx) => (
-                    <circle
-                      key={idx}
-                      cx={(idx / (profitSeries.length - 1)) * 600}
-                      cy={200 - (val / (maxRevenue * 0.2)) * 170}
-                      r="4.5"
-                      className="fill-white dark:fill-dark-card stroke-emerald-500"
-                      strokeWidth="2.5"
-                    />
-                  ))}
-                </>
-              )}
-
-              {activeChartTab === 'expenses' && (
-                <>
-                  {revenueSeries.map((val, idx) => {
-                    const x = (idx / (revenueSeries.length - 1)) * 560 + 20;
-                    const hRev = (val / maxRevenue) * 160;
-                    const expVal = expenseSeries[idx] || 0;
-                    const hExp = (expVal / maxRevenue) * 160;
-                    return (
-                      <g key={idx}>
-                        <rect x={x - 14} y={200 - hRev} width="12" height={hRev} rx="3" fill="#e61e25" />
-                        <rect x={x} y={200 - hExp} width="12" height={hExp} rx="3" fill="#f59e0b" />
-                      </g>
-                    );
-                  })}
-                </>
-              )}
-            </svg>
-
-            {/* X-Axis labels */}
-            <div className="flex justify-between items-center text-[10px] font-mono text-light-muted dark:text-dark-muted pt-2">
-              {chartDays.map((d, i) => (
-                <span key={i}>{d}</span>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Col: Category Breakdown Donut / Stats */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <PieIcon className="w-4 h-4 text-brand-500" />
-                Sales by Category
-              </h3>
-              <span className="text-[10px] font-mono text-light-muted">Total Share</span>
-            </div>
-
-            <div className="space-y-3">
-              {categoryTotals.map((cat, idx) => (
-                <div key={idx} className="space-y-1">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">{cat.name}</span>
-                    <span className="font-mono text-slate-900 dark:text-white font-bold">
-                      {cat.percent}% <span className="text-[10px] text-light-muted font-normal">(LKR {(cat.total / 1000).toFixed(0)}k)</span>
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full bg-light-surface dark:bg-dark-surface rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${
-                        idx === 0 ? 'bg-brand-500' : idx === 1 ? 'bg-blue-500' : idx === 2 ? 'bg-purple-500' : 'bg-emerald-500'
-                      }`}
-                      style={{ width: `${Math.max(5, cat.percent)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Payment Methods Pill Summary */}
-          <div className="mt-5 pt-4 border-t border-light-border dark:border-dark-border">
-            <div className="text-[10px] uppercase font-bold text-light-muted dark:text-dark-muted mb-2">
-              Payment Methods Intake
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="p-2 rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border">
-                <div className="text-[10px] text-light-muted">Cash in Hand</div>
-                <div className="font-mono font-bold text-slate-900 dark:text-white">
-                  LKR {paymentTotals.Cash.toLocaleString()}
-                </div>
-              </div>
-              <div className="p-2 rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border">
-                <div className="text-[10px] text-light-muted">Card Terminal</div>
-                <div className="font-mono font-bold text-slate-900 dark:text-white">
-                  LKR {paymentTotals.Card.toLocaleString()}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Section: Recent Sales, Live Activity Feed, Low Stock Warnings */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Invoices Table (2 cols) */}
-        <div className="lg:col-span-2 p-5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-              <Receipt className="w-4 h-4 text-brand-500" />
-              Recent Terminal Invoices
-            </h3>
-            <button
-              onClick={() => setActiveTab('reports')}
-              className="text-xs text-brand-500 hover:text-brand-600 font-semibold flex items-center gap-1"
-            >
-              View Full History <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
+        ) : (
+          /* Populated Invoices Table */
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-light-border dark:border-dark-border text-light-muted dark:text-dark-muted font-bold text-[10px] uppercase tracking-wider">
-                  <th className="pb-2.5">Invoice #</th>
-                  <th className="pb-2.5">Customer</th>
-                  <th className="pb-2.5">Items</th>
-                  <th className="pb-2.5">Method</th>
-                  <th className="pb-2.5 text-right">Total</th>
-                  <th className="pb-2.5 text-right">Action</th>
+                <tr className="border-b border-light-border dark:border-dark-border text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-wider font-semibold bg-slate-50/50 dark:bg-dark-surface/30">
+                  <th className="px-6 py-3 font-semibold w-12">No</th>
+                  <th className="px-4 py-3 font-semibold">Invoice #</th>
+                  <th className="px-4 py-3 font-semibold">Customer</th>
+                  <th className="px-4 py-3 font-semibold">Item Name</th>
+                  <th className="px-4 py-3 font-semibold">Order Date & Time</th>
+                  <th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 font-semibold text-right">Price</th>
+                  <th className="px-6 py-3 font-semibold text-center">Receipt</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-light-border dark:divide-dark-border">
-                {sales.slice(0, 5).map((sale) => (
-                  <tr key={sale.id} className="hover:bg-light-surface/60 dark:hover:bg-dark-surface/60 transition-colors">
-                    <td className="py-2.5 font-mono font-bold text-brand-500">
-                      {sale.invoiceNumber}
-                      <div className="text-[10px] text-light-muted font-normal font-sans">{sale.date} • {sale.time}</div>
-                    </td>
-                    <td className="py-2.5 font-semibold text-slate-800 dark:text-slate-200">
-                      {sale.customerName}
-                    </td>
-                    <td className="py-2.5 text-slate-600 dark:text-slate-400">
-                      {sale.items.length} item(s)
-                      <div className="text-[10px] text-light-muted truncate max-w-[150px]">
-                        {sale.items[0]?.productName}
-                      </div>
-                    </td>
-                    <td className="py-2.5">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border">
-                        {sale.paymentMethod}
-                      </span>
-                    </td>
-                    <td className="py-2.5 text-right font-mono font-bold text-slate-900 dark:text-white">
-                      LKR {sale.totalAmount.toLocaleString()}
-                    </td>
-                    <td className="py-2.5 text-right">
-                      <button
-                        onClick={() => handleOpenReceipt(sale)}
-                        className="px-2 py-1 rounded bg-light-elevated dark:bg-dark-elevated hover:text-brand-500 text-[10px] font-semibold transition-colors"
-                      >
-                        Receipt
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {data.recentSales.map((sale, idx) => {
+                  const avatarColor = getAvatarColor(sale.customerName);
+                  const firstItem = sale.items?.[0];
+                  const extraItemsCount = (sale.items?.length || 1) - 1;
+
+                  return (
+                    <tr
+                      key={sale.id}
+                      className="hover:bg-slate-50/80 dark:hover:bg-dark-surface/50 transition-colors"
+                    >
+                      {/* Row No */}
+                      <td className="px-6 py-3.5 text-slate-400 font-mono text-[11px]">
+                        {idx + 1}
+                      </td>
+
+                      {/* Invoice No */}
+                      <td className="px-4 py-3.5">
+                        <span className="font-mono font-bold text-brand-500 text-[11px]">
+                          {sale.invoiceNumber || '—'}
+                        </span>
+                      </td>
+
+                      {/* Customer with initials avatar */}
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[10px] flex-shrink-0 ${avatarColor}`}
+                          >
+                            {getInitials(sale.customerName)}
+                          </div>
+                          <div>
+                            <span className="font-semibold text-slate-800 dark:text-slate-200 block truncate max-w-[130px]">
+                              {sale.customerName || 'Walk-in Customer'}
+                            </span>
+                            {sale.customerPhone && (
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {sale.customerPhone}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Item Name */}
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-md bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 flex-shrink-0">
+                            <Package className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="truncate max-w-[180px]">
+                            <span className="font-medium text-slate-700 dark:text-slate-300">
+                              {firstItem?.productName || 'Apple Device'}
+                            </span>
+                            {extraItemsCount > 0 && (
+                              <span className="text-[10px] text-slate-400 ml-1">
+                                +{extraItemsCount} more
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Order Date & Time */}
+                      <td className="px-4 py-3.5 whitespace-nowrap text-slate-500 dark:text-slate-400">
+                        <div className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                          {sale.date}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {sale.time || ''}
+                        </div>
+                      </td>
+
+                      {/* Status */}
+                      <td className="px-4 py-3.5">
+                        <StatusBadge status={sale.status || 'Completed'} />
+                      </td>
+
+                      {/* Price / Amount */}
+                      <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-900 dark:text-white text-xs">
+                        {fmtRs(sale.totalAmount || 0)}
+                      </td>
+
+                      {/* Action / Receipt Button */}
+                      <td className="px-6 py-3.5 text-center">
+                        <button
+                          onClick={() => handleOpenReceipt(sale)}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-brand-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          title="View / Print Receipt"
+                        >
+                          <Printer className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        </div>
-
-        {/* Live Activity Feed & Low Stock (1 col) */}
-        <div className="space-y-6">
-          {/* Low Stock Alert Box */}
-          {lowStockProducts.length > 0 && (
-            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-bold text-xs">
-                  <AlertTriangle className="w-4 h-4 text-amber-500" />
-                  <span>Low Stock Warning ({lowStockProducts.length})</span>
-                </div>
-                <button
-                  onClick={() => setActiveTab('inventory')}
-                  className="text-[11px] underline font-bold"
-                >
-                  Manage
-                </button>
-              </div>
-              <div className="space-y-2">
-                {lowStockProducts.map(p => (
-                  <div key={p.id} className="flex justify-between items-center text-xs">
-                    <span className="font-semibold truncate max-w-[180px]">{p.name}</span>
-                    <span className="font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400">
-                      {p.currentStock} left
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Real-time Audit Activity Stream */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-brand-500" />
-              Live Store Activity
-            </h3>
-            <div className="space-y-3">
-              {auditLogs.slice(0, 5).map((log) => (
-                <div key={log.id} className="flex items-start gap-2.5 text-xs">
-                  <div className="mt-1 w-2 h-2 rounded-full bg-brand-500 flex-shrink-0" />
-                  <div className="flex-1">
-                    <div className="font-medium text-slate-800 dark:text-slate-200">
-                      {log.details}
-                    </div>
-                    <div className="text-[10px] text-light-muted dark:text-dark-muted font-mono flex items-center justify-between mt-0.5">
-                      <span>{log.userName}</span>
-                      <span>{log.timestamp.substring(11, 16)}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+        )}
       </div>
 
-      {/* Global Thermal Receipt Modal */}
+      </div>
+
+      {/* ── MODALS ────────────────────────────────────────────────────────── */}
+      {/* Trade-In Inspection Intake Modal (F7) */}
+      <TradeInInspectionModal
+        isOpen={isTradeInModalOpen}
+        onClose={() => setIsTradeInModalOpen(false)}
+        selectedCustomer={null}
+        onApplyTradeIn={handleApplyTradeIn}
+      />
+
+      {/* View / Print Receipt Modal */}
       <ReceiptModal
-        isOpen={isReceiptOpen}
-        onClose={() => {
-          setIsReceiptOpen(false);
-          setLastCompletedSale(null);
-        }}
+        isOpen={isReceiptModalOpen}
+        onClose={() => setIsReceiptModalOpen(false)}
         onNewSale={() => {
-          setIsReceiptOpen(false);
+          setIsReceiptModalOpen(false);
           setActiveTab('pos');
         }}
       />
