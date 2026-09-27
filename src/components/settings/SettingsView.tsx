@@ -1,4 +1,5 @@
-﻿'use client';
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { useAuth } from '../../context/AuthContext';
@@ -32,7 +33,8 @@ import {
   ShieldAlert,
   Trash2,
   AlertTriangle,
-  Palette
+  Palette,
+  Save
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -358,6 +360,47 @@ export const SettingsView: React.FC = () => {
     }
   };
 
+  const handleSelectBackupFolder = async () => {
+    try {
+      if ((window as any).electronAPI?.system?.selectBackupFolder) {
+        const res = await (window as any).electronAPI.system.selectBackupFolder();
+        if (res && res.data) {
+          const folder = res.data;
+          if ((window as any).electronAPI?.system?.setBackupFolder) {
+            await (window as any).electronAPI.system.setBackupFolder({ folderPath: folder });
+          }
+          showNotification('success', `Backup folder changed to: ${folder}`);
+          fetchBackupStatus();
+        }
+      } else {
+        showNotification('info', 'Folder selection is available in the desktop application');
+      }
+    } catch (err: any) {
+      showNotification('error', err?.message || 'Failed to select backup directory');
+    }
+  };
+
+  const handleSaveBackupAs = async () => {
+    setIsBackingUp(true);
+    try {
+      if ((window as any).electronAPI?.system?.saveBackupAs) {
+        const res = await (window as any).electronAPI.system.saveBackupAs();
+        if (res && res.success && !res.data?.canceled) {
+          showNotification('success', `Database backup saved successfully to: ${res.data?.filePath}`);
+          fetchBackupStatus();
+        } else if (res && !res.success) {
+          showNotification('error', res?.error || 'Failed to save backup file');
+        }
+      } else {
+        handleBackupJson();
+      }
+    } catch (err: any) {
+      showNotification('error', err?.message || 'Save backup failed');
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
   const handleRestoreBackup = async () => {
     try {
       if ((window as any).electronAPI?.system?.selectRestoreFile) {
@@ -527,7 +570,7 @@ export const SettingsView: React.FC = () => {
             )}
           </div>
 
-          {/* Base Dark/Light toggle â€” only shown when palette is 'default' */}
+          {/* Base Dark/Light toggle — only shown when palette is 'default' */}
           {colorPalette === 'default' && (
             <div>
               <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
@@ -548,7 +591,7 @@ export const SettingsView: React.FC = () => {
                         : 'border-light-border dark:border-dark-border text-slate-600 dark:text-slate-300 hover:border-brand-300'
                     }`}
                   >
-                    {mode === 'dark' ? 'ðŸŒ™ Dark' : mode === 'light' ? 'â˜€ï¸ Light' : 'ðŸ–¥ System'}
+                    {mode === 'dark' ? '🌙 Dark' : mode === 'light' ? '☀️ Light' : '🖥 System'}
                   </button>
                 ))}
               </div>
@@ -979,7 +1022,7 @@ export const SettingsView: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-3 font-mono text-center text-light-muted font-bold">
-                          {u.pinCode || 'â€¢â€¢â€¢â€¢'}
+                          {u.pinCode || '••••'}
                         </td>
                         <td className="py-3 font-mono text-[11px] text-light-muted">
                           {u.lastLogin || 'Never'}
@@ -1152,7 +1195,7 @@ export const SettingsView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={handleTriggerManualBackup}
                   disabled={isBackingUp}
@@ -1162,11 +1205,21 @@ export const SettingsView: React.FC = () => {
                   <span>{isBackingUp ? 'Backing Up...' : 'Backup Now'}</span>
                 </button>
                 <button
+                  onClick={handleSaveBackupAs}
+                  disabled={isBackingUp}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-2 transition-colors shadow-xs"
+                  title="Choose custom file name and folder to save a SQLite .db backup"
+                >
+                  <Save className="w-4 h-4 text-emerald-400" />
+                  <span>Save Backup As...</span>
+                </button>
+                <button
                   onClick={handleRestoreBackup}
                   className="px-4 py-2 rounded-xl bg-light-surface dark:bg-dark-surface hover:bg-light-border dark:hover:bg-dark-border text-slate-800 dark:text-slate-200 text-xs font-bold border border-light-border dark:border-dark-border flex items-center gap-2 transition-colors"
+                  title="Restore from an existing SQLite .db backup file"
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Restore</span>
+                  <span>Restore from File</span>
                 </button>
                 <button
                   onClick={handleBackupJson}
@@ -1193,7 +1246,7 @@ export const SettingsView: React.FC = () => {
               <div className="p-3.5 rounded-2xl bg-light-surface/60 dark:bg-dark-surface/60 border border-light-border dark:border-dark-border">
                 <div className="text-[10px] uppercase font-bold text-light-muted dark:text-dark-muted">Interval Failsafe</div>
                 <div className="text-sm font-black text-emerald-500 mt-1">Every 8 Hours</div>
-                <div className="text-[10px] text-light-muted mt-0.5">Guarantees â‰¥2 backups daily</div>
+                <div className="text-[10px] text-light-muted mt-0.5">Guarantees ≥2 backups daily</div>
               </div>
               <div className="p-3.5 rounded-2xl bg-light-surface/60 dark:bg-dark-surface/60 border border-light-border dark:border-dark-border">
                 <div className="text-[10px] uppercase font-bold text-light-muted dark:text-dark-muted">Retention Policy</div>
@@ -1202,16 +1255,30 @@ export const SettingsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Folder & Status Info */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-dark-surface/80 border border-light-border dark:border-dark-border flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-2">
-              <div className="flex items-center gap-2">
-                <FolderOpen className="w-4 h-4 text-brand-500 flex-shrink-0" />
-                <span className="text-light-muted font-medium">Backup Folder:</span>
-                <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 text-[11px] truncate max-w-xs md:max-w-md">
+            {/* Folder & Status Info with Manual Choose Button */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-dark-surface/80 border border-light-border dark:border-dark-border flex flex-col md:flex-row md:items-center justify-between text-xs gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
+                <div className="flex items-center gap-2">
+                  <FolderOpen className="w-4 h-4 text-brand-500 flex-shrink-0" />
+                  <span className="text-light-muted font-medium whitespace-nowrap">Backup Folder:</span>
+                </div>
+                <span
+                  title={backupStatus?.backupDirectory || '%APPDATA%/AppleVisionPOS/backups/auto'}
+                  className="font-mono font-semibold text-slate-800 dark:text-slate-200 text-[11px] truncate max-w-xs md:max-w-md bg-light-elevated dark:bg-dark-elevated px-2.5 py-1 rounded-lg border border-light-border dark:border-dark-border"
+                >
                   {backupStatus?.backupDirectory || '%APPDATA%/AppleVisionPOS/backups/auto'}
                 </span>
+                <button
+                  type="button"
+                  onClick={handleSelectBackupFolder}
+                  className="px-3 py-1 rounded-lg bg-brand-500/10 hover:bg-brand-500/20 text-brand-600 dark:text-brand-400 border border-brand-500/30 text-xs font-bold transition-colors w-fit flex items-center gap-1.5 flex-shrink-0"
+                  title="Browse and select custom backup destination folder"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  <span>Browse / Change Folder</span>
+                </button>
               </div>
-              <div className="text-[11px] text-light-muted">
+              <div className="text-[11px] text-light-muted flex-shrink-0">
                 Last Backup: <strong className="text-slate-900 dark:text-white font-mono">{backupStatus?.lastBackupTime || 'Active on system start'}</strong>
               </div>
             </div>
@@ -1236,7 +1303,7 @@ export const SettingsView: React.FC = () => {
                           </div>
                           <div className="text-[10px] text-light-muted flex items-center gap-2">
                             <span>{b.createdAt}</span>
-                            <span>â€¢</span>
+                            <span>•</span>
                             <span className="uppercase text-brand-500 font-bold">{b.type}</span>
                           </div>
                         </div>

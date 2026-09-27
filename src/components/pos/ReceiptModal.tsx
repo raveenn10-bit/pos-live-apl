@@ -1,4 +1,5 @@
-﻿'use client';
+'use client';
+
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { 
@@ -19,7 +20,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { APPLEVISION_LOGO_BASE64 } from '../../assets/logoBase64';
-import { BarcodeSvg } from '../../utils/barcodeGenerator';
+import { BarcodeSvg, generateCode128Svg } from '../../utils/barcodeGenerator';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -168,145 +169,588 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
 const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docType: 'INVOICE' | 'QUOTE'): string => {
   const accentColor = docType === 'QUOTE' ? '#0ea5e9' : '#e61e25';
   const isQuote = docType === 'QUOTE';
-  const logoSrc = APPLEVISION_LOGO_BASE64; // colored logo
+  const logoSrc = APPLEVISION_LOGO_BASE64;
   
+  const barcodeSvg = generateCode128Svg(s.invoiceNumber, {
+    height: 44,
+    showText: true,
+    fontSize: 11,
+    lineColor: '#0f172a',
+    backgroundColor: 'transparent'
+  });
+
+  const tradeInRecord = s.tradeInRecord || (s as any).tradeIn || (s as any).trade_in;
+  const tradeInCredit = s.tradeInCredit || tradeInRecord?.finalApprovedValue || tradeInRecord?.final_approved_value || 0;
+
   const itemRows = s.items.map((item, idx) => {
-    const bg = idx % 2 === 0 ? '#ffffff' : '#f9f9f9';
+    const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
     const discount = Number((item as any).discountAmount || (item as any).discount_amount || 0);
+    const unitPrice = Number(item.unitPrice || 0);
+    const lineTotal = Number(item.lineTotal || (item as any).line_total || (item.quantity * unitPrice));
+    const imei = item.imei || '';
+    const warranty = item.warranty && item.warranty !== 'None' ? item.warranty : '3 Months AppleVision Warranty';
     return `
     <tr style="background:${bg};">
-      <td style="padding:10px 12px;font-size:12px;text-align:center;border-bottom:1px solid #e2e8f0;">${idx+1}</td>
+      <td style="padding:10px 12px;font-size:11px;text-align:center;color:#64748b;border-bottom:1px solid #e2e8f0;font-weight:600;">${String(idx+1).padStart(2, '0')}.</td>
       <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;">
-        <div style="font-weight:600;font-size:13px;color:#000;">${item.productName || (item as any).product_name || 'Apple Device'}</div>
-        ${item.imei ? `<div style="font-size:11px;color:#555;margin-top:2px;">IMEI: ${item.imei}</div>` : ''}
-        ${item.warranty && item.warranty !== 'None' ? `<div style="font-size:11px;color:#555;margin-top:1px;">Warranty: ${item.warranty}</div>` : ''}
+        <div style="font-weight:700;font-size:13px;color:#0f172a;letter-spacing:-0.2px;">${item.productName || (item as any).product_name || 'Apple Device'}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px;">
+          ${imei ? `<span style="font-family:'Courier New',Courier,monospace;font-size:10px;background:#f1f5f9;color:#334155;padding:2px 7px;border-radius:4px;border:1px solid #cbd5e1;font-weight:700;">IMEI: ${imei}</span>` : ''}
+          <span style="font-size:10px;font-weight:700;color:#059669;background:#ecfdf5;padding:2px 7px;border-radius:4px;border:1px solid #a7f3d0;">✓ ${warranty}</span>
+        </div>
       </td>
-      <td style="padding:10px 12px;text-align:right;font-size:12px;color:#000;border-bottom:1px solid #e2e8f0;">Rs. ${Number(item.unitPrice||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-      <td style="padding:10px 12px;text-align:center;font-size:12px;color:#000;border-bottom:1px solid #e2e8f0;">${item.quantity}</td>
-      <td style="padding:10px 12px;text-align:right;font-weight:700;font-size:13px;color:#000;border-bottom:1px solid #e2e8f0;">Rs. ${Number(item.lineTotal||(item as any).line_total||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td style="padding:10px 12px;text-align:right;font-size:12px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">Rs. ${unitPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td style="padding:10px 12px;text-align:center;font-size:12px;color:#0f172a;font-weight:700;border-bottom:1px solid #e2e8f0;">${item.quantity}</td>
+      <td style="padding:10px 12px;text-align:right;font-weight:800;font-size:13px;color:#0f172a;border-bottom:1px solid #e2e8f0;">Rs. ${lineTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
     </tr>`;
   }).join('');
 
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${docType} - ${s.invoiceNumber}</title><style>
-    @page { margin: 0; size: A4; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${docType} - ${s.invoiceNumber}</title>
+  <style>
+    @page {
+      margin: 10mm 12mm 10mm 12mm;
+      size: A4 portrait;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
     body {
-      font-family: Arial, sans-serif;
-      font-size: 13px;
-      line-height: 1.5;
-      color: #000;
-      background: #f5f5f5;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #0f172a;
+      background: #ffffff;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
-      padding: 40px;
+      padding: 0;
     }
-    .container { background: #ffffff; width: 100%; min-height: 1000px; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-    .top-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
-    .logo-box { background: ${accentColor}; padding: 10px; display: inline-block; margin-right: 15px; }
-    .logo-box img { max-height: 50px; max-width: 50px; object-fit: contain; filter: brightness(0) invert(1); }
-    .company-info { display: inline-block; vertical-align: top; }
-    .company-name { font-size: 20px; font-weight: bold; color: #000; }
-    .company-subtitle { font-size: 12px; color: #555; margin-top: 5px; }
-    .doc-title { font-size: 36px; font-weight: bold; color: #000; text-align: right; }
-    .doc-number { font-size: 14px; color: #555; text-align: right; margin-top: 5px; }
-    .second-row { display: flex; justify-content: space-between; margin-bottom: 30px; }
-    .bill-to h3 { font-size: 14px; color: #000; margin-bottom: 5px; }
-    .bill-to-name { font-size: 14px; color: #555; }
-    .info-boxes { display: flex; gap: 20px; }
-    .info-box { background: #f9f9f9; padding: 10px 20px; border: 1px solid #eee; }
-    .info-box-title { font-size: 11px; color: #555; margin-bottom: 5px; text-transform: uppercase; }
-    .info-box-value { font-size: 13px; font-weight: bold; color: #000; }
-    .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-    .items-table thead tr { background: ${accentColor}; color: #fff; }
-    .items-table th { padding: 12px; text-align: left; font-size: 11px; font-weight: bold; text-transform: uppercase; }
-    .items-table th.center { text-align: center; }
-    .items-table th.right { text-align: right; }
-    .bottom-section { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 40px; }
-    .payment-info, .terms-info { flex: 1; }
-    .section-title { font-size: 12px; font-weight: bold; color: #000; margin-bottom: 10px; text-transform: uppercase; }
-    .section-text { font-size: 11px; color: #555; line-height: 1.5; }
-    .totals-box { flex: 1; max-width: 300px; }
-    .totals-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; color: #000; border-bottom: 1px solid #eee; }
-    .totals-row.grand-total { background: ${accentColor}; color: #fff; font-size: 15px; font-weight: bold; padding: 12px 15px; border: none; margin-top: 10px; }
-    .footer { display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #eee; padding-top: 20px; }
-    .manager-name { font-size: 14px; font-weight: bold; color: #000; }
-    .manager-title { font-size: 11px; color: #555; }
-    .contact-info { font-size: 11px; color: #555; margin-top: 5px; }
-    .thank-you { font-size: 16px; font-weight: bold; font-style: italic; color: ${accentColor}; }
-  </style></head><body>
-  <div class="container">
-    <div class="top-row">
-      <div>
-        <div class="logo-box"><img src="${logoSrc}" alt="Logo" /></div>
-        <div class="company-info">
-          <div class="company-name">${storeSettings.fullName || 'AppleVision Store Galle'}</div>
-          <div class="company-subtitle">Authorized Apple Reseller</div>
+    .page-wrapper {
+      width: 100%;
+      background: #ffffff;
+    }
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 20px;
+      border-bottom: 2px solid #f1f5f9;
+    }
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .brand-logo-img {
+      width: 68px;
+      height: 68px;
+      border-radius: 14px;
+      object-fit: cover;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      border: 1px solid #0f172a;
+      background: #000000;
+      display: block;
+    }
+    .company-title {
+      font-size: 22px;
+      font-weight: 900;
+      color: #0f172a;
+      letter-spacing: -0.5px;
+      line-height: 1.15;
+    }
+    .company-tagline {
+      font-size: 10px;
+      font-weight: 800;
+      color: ${accentColor};
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-top: 3px;
+    }
+    .store-address {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+    .doc-meta-right {
+      text-align: right;
+    }
+    .doc-main-title {
+      font-size: 34px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: #0f172a;
+      line-height: 1;
+    }
+    .doc-ref-number {
+      font-size: 13px;
+      font-family: 'Courier New', Courier, monospace;
+      font-weight: 700;
+      color: #64748b;
+      margin-top: 5px;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-top: 8px;
+    }
+    .badge-paid {
+      background: #ecfdf5;
+      color: #059669;
+      border: 1px solid #a7f3d0;
+    }
+    .badge-quote {
+      background: #f0f9ff;
+      color: #0284c7;
+      border: 1px solid #bae6fd;
+    }
+    .second-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-top: 22px;
+      margin-bottom: 22px;
+    }
+    .bill-to-card {
+      flex: 1.1;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 14px 18px;
+    }
+    .card-label {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: ${accentColor};
+      margin-bottom: 6px;
+    }
+    .customer-name {
+      font-size: 15px;
+      font-weight: 800;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .customer-line {
+      font-size: 11px;
+      color: #475569;
+      line-height: 1.6;
+    }
+    .invoice-info-card {
+      flex: 1.3;
+      display: flex;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .accent-indicator {
+      width: 5px;
+      background: ${accentColor};
+      flex-shrink: 0;
+    }
+    .info-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      padding: 12px 18px;
+      gap: 10px 16px;
+    }
+    .info-label {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #64748b;
+    }
+    .info-value {
+      font-size: 12px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-top: 2px;
+    }
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #e2e8f0;
+      margin-bottom: 20px;
+    }
+    .items-table thead tr {
+      background: ${accentColor};
+      color: #ffffff;
+    }
+    .items-table th {
+      padding: 11px 12px;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    .trade-in-card {
+      background: #f0fdf4;
+      border: 1.5px dashed #22c55e;
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .trade-in-badge {
+      font-size: 10px;
+      font-weight: 800;
+      background: #16a34a;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-right: 8px;
+    }
+    .trade-in-text {
+      font-size: 12px;
+      font-weight: 700;
+      color: #14532d;
+    }
+    .trade-in-val {
+      font-size: 13px;
+      font-weight: 800;
+      color: #16a34a;
+    }
+    .bottom-layout {
+      display: flex;
+      gap: 22px;
+      margin-bottom: 24px;
+      align-items: flex-start;
+    }
+    .bottom-left {
+      flex: 1.4;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .bottom-right {
+      flex: 1;
+    }
+    .payment-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .box-heading {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: ${accentColor};
+      margin-bottom: 6px;
+    }
+    .payment-content {
+      font-size: 11px;
+      color: #334155;
+      line-height: 1.6;
+    }
+    .warranty-box {
+      background: ${isQuote ? '#f0f9ff' : '#fff1f2'};
+      border: 1.5px solid ${isQuote ? '#bae6fd' : '#fecdd3'};
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .warranty-title {
+      font-size: 11px;
+      font-weight: 800;
+      color: ${accentColor};
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .warranty-sinhala {
+      font-size: 11px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 5px;
+    }
+    .warranty-terms {
+      font-size: 10px;
+      color: #475569;
+      line-height: 1.55;
+    }
+    .barcode-panel {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+    .barcode-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: #64748b;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .totals-container {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+    .totals-line {
+      display: flex;
+      justify-content: space-between;
+      padding: 9px 16px;
+      font-size: 12px;
+      color: #334155;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .totals-grand {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 16px;
+      font-size: 15px;
+      font-weight: 800;
+      background: ${accentColor};
+      color: #ffffff;
+    }
+    .footer-strip {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      border-top: 1.5px solid #e2e8f0;
+      padding-top: 18px;
+      margin-top: 10px;
+    }
+    .sign-area {
+      text-align: left;
+    }
+    .sign-line {
+      width: 170px;
+      border-bottom: 1.5px dashed #94a3b8;
+      margin-bottom: 6px;
+      height: 28px;
+    }
+    .sign-officer {
+      font-size: 12px;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .sign-role {
+      font-size: 10px;
+      color: #64748b;
+    }
+    .thank-you-msg {
+      text-align: right;
+      font-size: 18px;
+      font-weight: 800;
+      font-style: italic;
+      color: ${accentColor};
+      letter-spacing: -0.3px;
+    }
+    .thank-sub {
+      font-size: 10px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .disclaimer {
+      font-size: 9px;
+      color: #94a3b8;
+      text-align: center;
+      margin-top: 14px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <div class="page-wrapper">
+    <!-- Top Header -->
+    <div class="header-row">
+      <div class="brand-group">
+        <img src="${logoSrc}" alt="AppleVision Logo" class="brand-logo-img" />
+        <div>
+          <div class="company-title">${storeSettings.fullName || 'AppleVision Store Galle'}</div>
+          <div class="company-tagline">Reliable Best Service · Genuine Apple Retail</div>
+          <div class="store-address">
+            ${storeSettings.address || 'Kalegana Junction'}, ${storeSettings.city || 'Galle'} 80000, Sri Lanka<br>
+            Hotline: <strong>${storeSettings.phone || '+94 77 923 0519'}</strong> &nbsp;|&nbsp; Email: <strong>${storeSettings.email || 'nethminasurinda@gmail.com'}</strong>
+          </div>
         </div>
       </div>
-      <div>
-        <div class="doc-title">${isQuote ? 'QUOTE' : 'INVOICE'}</div>
-        <div class="doc-number">${s.invoiceNumber}</div>
+      <div class="doc-meta-right">
+        <div class="doc-main-title">${isQuote ? 'QUOTATION' : 'INVOICE'}</div>
+        <div class="doc-ref-number">#${s.invoiceNumber}</div>
+        <div class="status-badge ${isQuote ? 'badge-quote' : 'badge-paid'}">
+          ${isQuote ? 'OFFICIAL QUOTATION · 30 DAYS' : 'PAID IN FULL ✓'}
+        </div>
       </div>
     </div>
+
+    <!-- Second Row: Customer Details & Transaction Card (Reference Style) -->
     <div class="second-row">
-      <div class="bill-to">
-        <h3>${isQuote ? 'QUOTE TO:' : 'INVOICE TO:'}</h3>
-        <div class="bill-to-name">${s.customerName || 'Walk-in Customer'}</div>
-        ${s.customerPhone ? `<div class="bill-to-name">${s.customerPhone}</div>` : ''}
-      </div>
-      <div class="info-boxes">
-        <div class="info-box">
-          <div class="info-box-title">Invoice Number</div>
-          <div class="info-box-value">${s.invoiceNumber}</div>
+      <div class="bill-to-card">
+        <div class="card-label">INVOICE TO:</div>
+        <div class="customer-name">${s.customerName || 'Valued Walk-in Customer'}</div>
+        ${s.customerPhone ? `<div class="customer-line">Mobile: <strong>${s.customerPhone}</strong></div>` : ''}
+        <div class="customer-line">Location: ${(s as any).customerAddress || 'Galle, Southern Province, Sri Lanka'}</div>
+        <div class="customer-line" style="margin-top: 3px; font-size: 10px; color: #64748b;">
+          Payment Method: <strong>${s.paymentMethod || 'Cash'}</strong>
         </div>
-        <div class="info-box">
-          <div class="info-box-title">Date Information</div>
-          <div class="info-box-value">${s.date}</div>
+      </div>
+
+      <div class="invoice-info-card">
+        <div class="accent-indicator"></div>
+        <div class="info-grid">
+          <div>
+            <div class="info-label">Invoice Number</div>
+            <div class="info-value">${s.invoiceNumber}</div>
+          </div>
+          <div>
+            <div class="info-label">Date Information</div>
+            <div class="info-value">${s.date} ${s.time || ''}</div>
+          </div>
+          <div>
+            <div class="info-label">Cashier / Attendant</div>
+            <div class="info-value">${s.cashierName || 'Staff'}</div>
+          </div>
+          <div>
+            <div class="info-label">Transaction Status</div>
+            <div class="info-value" style="color: ${isQuote ? '#0284c7' : '#059669'};">${isQuote ? 'QUOTED' : 'COMPLETED'}</div>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- Items Table -->
     <table class="items-table">
-      <thead><tr>
-        <th class="center" style="width: 50px;">NO</th>
-        <th>ITEM DESCRIPTION</th>
-        <th class="right" style="width: 120px;">PRICE</th>
-        <th class="center" style="width: 80px;">QTY</th>
-        <th class="right" style="width: 120px;">TOTAL</th>
-      </tr></thead>
-      <tbody>${itemRows}</tbody>
+      <thead>
+        <tr>
+          <th style="width: 40px; text-align: center;">NO</th>
+          <th style="text-align: left;">ITEM DESCRIPTION</th>
+          <th style="width: 120px; text-align: right;">PRICE</th>
+          <th style="width: 60px; text-align: center;">QTY</th>
+          <th style="width: 130px; text-align: right;">TOTAL</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemRows}
+      </tbody>
     </table>
-    <div class="bottom-section">
-      <div class="payment-info">
-        <div class="section-title">Payment Method</div>
-        <div class="section-text">
-          ${isQuote ? 'Cash � Bank Transfer � Card � Installment<br>Bank: Commercial Bank of Ceylon, Galle Branch<br>Account: AppleVision Store Galle' : 
-          `Method: ${s.paymentMethod}<br>Amount Paid: Rs. ${Number((s as any).amountPaid || s.totalAmount || 0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}${(s as any).bankName ? `<br>Bank: ${(s as any).bankName}` : ''}`}
-        </div>
+
+    <!-- Trade-In Device Received (if any) -->
+    ${tradeInCredit > 0 ? `
+    <div class="trade-in-card">
+      <div style="display:flex;align-items:center;">
+        <span class="trade-in-badge">★ TRADE-IN TAKEN</span>
+        <span class="trade-in-text">
+          ${tradeInRecord?.brand || 'Apple'} ${tradeInRecord?.model || 'Device'}
+          ${tradeInRecord?.storage ? `(${tradeInRecord.storage})` : ''}
+          ${tradeInRecord?.imei ? `&nbsp;·&nbsp; IMEI: ${tradeInRecord.imei}` : ''}
+          ${tradeInRecord?.batteryHealth ? `&nbsp;·&nbsp; Battery: ${tradeInRecord.batteryHealth}%` : ''}
+          ${tradeInRecord?.grade ? `&nbsp;·&nbsp; Grade: ${tradeInRecord.grade}` : ''}
+        </span>
       </div>
-      <div class="terms-info">
-        <div class="section-title">Terms & Conditions</div>
-        <div class="section-text">
-          ${isQuote ? 'All quoted devices are genuine Apple products with valid serial numbers. Prices valid for 30 days.' : 
-          '3 Months Phone-to-Phone Replacement Warranty for device hardware defects. Warranty valid with original invoice & matching IMEI.'}
-        </div>
-      </div>
-      <div class="totals-box">
-        <div class="totals-row"><span>Sub Total</span><span>Rs. ${Number(s.subtotal||0).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
-        ${Number(s.discountTotal||0) > 0 ? `<div class="totals-row"><span>Discount</span><span>-Rs. ${Number(s.discountTotal||0).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>` : ''}
-        ${tradeInCredit > 0 ? `<div class="totals-row"><span>Trade-In Credit</span><span>-Rs. ${Number(tradeInCredit).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>` : ''}
-        <div class="totals-row grand-total"><span>Grand Total</span><span>Rs. ${Number(s.totalAmount||0).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
+      <div class="trade-in-val">
+        Credit Deducted: -Rs. ${Number(tradeInCredit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </div>
     </div>
-    <div class="footer">
-      <div>
-        <div class="manager-name">${(storeSettings as any).managerName || s.cashierName || 'Store Manager'}</div>
-        <div class="manager-title">Store Manager</div>
-        <div class="contact-info">${storeSettings.phone || '+94 77 923 0519'} | ${storeSettings.email || 'nethminasurinda@gmail.com'}</div>
+    ` : ''}
+
+    <!-- Bottom Section: Payment / Terms on Left, Totals on Right -->
+    <div class="bottom-layout">
+      <div class="bottom-left">
+        <!-- Payment & Bank Details -->
+        <div class="payment-box">
+          <div class="box-heading">Payment Information &amp; Bank Details</div>
+          <div class="payment-content">
+            Method: <strong>${s.paymentMethod || 'Cash'}</strong> &nbsp;|&nbsp;
+            Status: <strong>${isQuote ? 'Quoted' : 'Paid in Full'}</strong><br>
+            Bank: <strong>Commercial Bank of Ceylon PLC</strong> &nbsp;·&nbsp; Branch: <strong>Galle City</strong><br>
+            Account: <strong>AppleVision Store Galle</strong> &nbsp;·&nbsp; Account No: <strong>8009230519</strong>
+          </div>
+        </div>
+
+        <!-- Warranty & Guarantee Policy -->
+        <div class="warranty-box">
+          <div class="warranty-title">★ 3-Month Phone-to-Phone Replacement Warranty ★</div>
+          <div class="warranty-sinhala">දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි</div>
+          <div class="warranty-terms">
+            1. 3-Month Phone-to-Phone Replacement Warranty for device hardware/logic board defects.<br>
+            2. Warranty is valid ONLY upon presentation of this original invoice with matching device IMEI.<br>
+            3. Drops, screen damage, liquid ingress, or unauthorized disassembly strictly voids warranty.<br>
+            4. Apple ID / iCloud security is customer's responsibility. Exchange within 7 days in original state.
+          </div>
+        </div>
+
+        <!-- Barcode Verification -->
+        <div class="barcode-panel">
+          <div class="barcode-label">Scan to Verify Official Invoice</div>
+          ${barcodeSvg}
+        </div>
       </div>
-      <div class="thank-you">Thank you for your business!</div>
+
+      <div class="bottom-right">
+        <!-- Totals Container -->
+        <div class="totals-container">
+          <div class="totals-line">
+            <span>Sub Total</span>
+            <span style="font-weight:700;">Rs. ${Number(s.subtotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </div>
+          ${Number(s.discountTotal || 0) > 0 ? `
+          <div class="totals-line" style="color: #dc2626;">
+            <span>Discount</span>
+            <span style="font-weight:700;">-Rs. ${Number(s.discountTotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </div>` : ''}
+          ${tradeInCredit > 0 ? `
+          <div class="totals-line" style="color: #16a34a;">
+            <span>Trade-In Credit</span>
+            <span style="font-weight:700;">-Rs. ${Number(tradeInCredit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </div>` : ''}
+          <div class="totals-line">
+            <span>Tax / VAT (0%)</span>
+            <span style="color:#64748b;">Included</span>
+          </div>
+          <div class="totals-grand">
+            <span>${isQuote ? 'QUOTED TOTAL' : 'TOTAL PAID'}</span>
+            <span>Rs. ${Number(s.totalAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer: Manager Signature, Thank You & Store Tagline -->
+    <div class="footer-strip">
+      <div class="sign-area">
+        <div class="sign-line"></div>
+        <div class="sign-officer">${(storeSettings as any).managerName || 'Surinda Nethmina'}</div>
+        <div class="sign-role">Store Manager / Authorized Officer</div>
+      </div>
+      <div>
+        <div class="thank-you-msg">Thank you for your business!</div>
+        <div class="thank-sub">AppleVision Store Galle · Kalegana Junction, Galle</div>
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      *** REVOLUTIONIZING APPLE RETAIL IN GALLE · OFFICIAL APPLEVISION TAX INVOICE · SYSTEM GENERATED ***
     </div>
   </div>
-</body></html>`;
+</body>
+</html>`;
 };
 
 const handleDownloadA4Invoice = async () => {
