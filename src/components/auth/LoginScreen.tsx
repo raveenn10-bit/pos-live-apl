@@ -82,7 +82,7 @@ export const LoginScreen: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-screen flex flex-col justify-between bg-light-bg dark:bg-dark-bg text-light-text dark:text-dark-text relative overflow-hidden select-none transition-colors duration-200">
+    <div className="fixed inset-0 w-full h-[100dvh] flex flex-col justify-between bg-light-bg dark:bg-dark-bg text-light-text dark:text-dark-text relative overflow-y-auto overscroll-none select-none transition-colors duration-200">
       {/* Top right theme toggle */}
       <div className="absolute top-5 right-5 z-20">
         <button

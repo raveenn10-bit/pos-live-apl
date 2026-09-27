@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 const App = dynamic(() => import('@/src/App'), {
   ssr: false,
   loading: () => (
-    <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#000000] text-white">
+    <div className="fixed inset-0 w-full h-[100dvh] flex flex-col items-center justify-center bg-[#000000] text-white">
       <div className="flex flex-col items-center gap-3">
         <div className="w-10 h-10 border-2 border-red-500/20 border-t-red-500 rounded-full animate-spin" />
         <span className="text-xs font-medium tracking-wide text-neutral-400">Loading AppleVision POS...</span>
@@ -24,7 +24,7 @@ export default function Page() {
 
   if (!mounted) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#000000] text-white">
+      <div className="fixed inset-0 w-full h-[100dvh] flex flex-col items-center justify-center bg-[#000000] text-white">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-2 border-red-500/20 border-t-red-500 rounded-full animate-spin" />
           <span className="text-xs font-medium tracking-wide text-neutral-400">AppleVision Store Galle</span>

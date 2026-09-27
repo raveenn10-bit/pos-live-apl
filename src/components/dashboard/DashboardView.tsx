@@ -966,12 +966,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const totalOutstandingCredit = useMemo(() => (customers || []).reduce((acc, c) => acc + (c.creditBalance || 0), 0), [customers]);
 
   return (
-    <div className="space-y-6 pb-20 md:pb-8">
+    <div className="space-y-6 pb-24 md:pb-8 max-w-full overflow-x-hidden">
       {/* ======================================================== */}
       {/* ======================================================== */}
       {/* ULTRA-PREMIUM APPLE IPHONE MATCHING AESTHETIC MOBILE VIEW */}
       {/* ======================================================== */}
-      <div className="md:hidden space-y-4">
+      <div className="md:hidden space-y-4 max-w-full overflow-x-hidden touch-pan-y">
         {/* 1. iOS Dynamic Island / Status Capsule */}
         <div className="flex justify-center pt-1 pb-1">
           <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-black/95 dark:bg-black text-white shadow-2xl border border-white/15 backdrop-blur-2xl">

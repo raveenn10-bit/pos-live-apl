@@ -149,3 +149,74 @@
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 1rem);
 }
+
+/* ======================================================== */
+/* NATIVE APP SMOOTH TOUCH & MOBILE ZOOM LOCK               */
+/* ======================================================== */
+
+html, body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+
+  /* Prevent browser rubber-banding & pull-to-refresh on outer canvas */
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
+  overscroll-behavior-x: none;
+
+  /* Native touch physics */
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+
+  /* Prevent iOS text auto-zoom */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Momentum scrolling for all scrollable containers */
+.overflow-y-auto,
+.overflow-x-auto,
+main {
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior-y: contain !important;
+  overscroll-behavior-x: contain !important;
+  scroll-behavior: smooth;
+  touch-action: pan-y;
+}
+
+/* Prevent double-tap zoom & tap delay on all clickable elements */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Eliminate iOS Safari automatic zoom on input focus by setting 16px minimum on mobile */
+@media screen and (max-width: 768px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Allow text selection only in form inputs and numbers */
+input,
+textarea,
+[contenteditable="true"],
+.selectable-text {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}

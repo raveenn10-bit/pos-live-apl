@@ -77,6 +77,7 @@ const MainLayout: React.FC = () => {
       }
 
       // Escape to close modals
+      // Escape to close modals
       if (e.key === 'Escape') {
         setIsCommandPaletteOpen(false);
         setIsPassportModalOpen(false);
@@ -88,12 +89,48 @@ const MainLayout: React.FC = () => {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [closeDevicePassport]);
 
+  // Lock mobile pinch-to-zoom and double-tap zoom for native app feel
+  useEffect(() => {
+    const preventPinch = (e: TouchEvent) => {
+      if (e.touches && e.touches.length > 1) {
+        e.preventDefault();
+      }
+    };
+
+    const preventGesture = (e: Event) => {
+      e.preventDefault();
+    };
+
+    let lastTouchEnd = 0;
+    const preventDoubleTap = (e: TouchEvent) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) {
+        e.preventDefault();
+      }
+      lastTouchEnd = now;
+    };
+
+    document.addEventListener('touchstart', preventPinch, { passive: false });
+    document.addEventListener('gesturestart', preventGesture, { passive: false });
+    document.addEventListener('gesturechange', preventGesture, { passive: false });
+    document.addEventListener('gestureend', preventGesture, { passive: false });
+    document.addEventListener('touchend', preventDoubleTap, { passive: false });
+
+    return () => {
+      document.removeEventListener('touchstart', preventPinch);
+      document.removeEventListener('gesturestart', preventGesture);
+      document.removeEventListener('gesturechange', preventGesture);
+      document.removeEventListener('gestureend', preventGesture);
+      document.removeEventListener('touchend', preventDoubleTap);
+    };
+  }, []);
+
   if (!isAuthenticated) {
     return <LoginScreen />;
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-light-bg dark:bg-dark-bg text-light-text dark:text-dark-text overflow-hidden select-none transition-colors duration-200">
+    <div className="fixed inset-0 w-full h-[100dvh] flex flex-col bg-light-bg dark:bg-dark-bg text-light-text dark:text-dark-text overflow-hidden select-none overscroll-none transition-colors duration-200">
       {/* Top Header */}
       <Header
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
@@ -106,7 +143,7 @@ const MainLayout: React.FC = () => {
         <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
         {/* View Content Canvas */}
-        <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6 bg-light-bg dark:bg-dark-bg transition-colors duration-200">
+        <main className="flex-1 overflow-y-auto overscroll-y-contain -webkit-overflow-scrolling-touch p-3 sm:p-4 md:p-6 pb-28 md:pb-6 bg-light-bg dark:bg-dark-bg transition-colors duration-200">
           {activeTab === 'dashboard' && (
             <DashboardView
               setActiveTab={setActiveTab}
