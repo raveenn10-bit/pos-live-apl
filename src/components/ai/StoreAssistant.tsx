@@ -1,5 +1,4 @@
 ﻿'use client';
-
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { useAuth } from '../../context/AuthContext';
@@ -108,11 +107,10 @@ export const StoreAssistant: React.FC = () => {
       const totalProf = todaySales.reduce((acc, s) => acc + s.profitTotal, 0);
       const margin = totalRev > 0 ? Math.round((totalProf / totalRev) * 100) : 0;
 
-      const replyText = `📊 **Today's Financial Summary (Kalegana Store)**\n\n` +
-        `• **Gross Sales:** LKR ${totalRev.toLocaleString()}\n` +
-        `• **Gross Profit:** LKR ${totalProf.toLocaleString()} (${margin}% spread)\n` +
-        `• **Completed Invoices:** ${todaySales.length} orders\n` +
-        `• **Top Seller:** iPhone 15 Pro Max 256GB Natural Titanium`;
+      const replyText = `ðŸ“Š **Today's Financial Summary (Kalegana Store)**\n\n` +
+        `â€¢ **Gross Sales:** LKR ${totalRev.toLocaleString()}\n` +
+        `â€¢ **Gross Profit:** LKR ${totalProf.toLocaleString()} (${margin}% spread)\n` +
+        `â€¢ **Completed Invoices:** ${todaySales.length} orders`;
 
       setMessages(prev => [
         ...prev,
@@ -124,13 +122,13 @@ export const StoreAssistant: React.FC = () => {
     // 2. LOW STOCK QUERY (Safe Read)
     if (lower.includes('low') || lower.includes('stock') && !lower.includes('restock') && !lower.includes('adjust')) {
       const lowStock = products.filter(p => p.currentStock <= p.minStock);
-      let replyText = `📦 **Inventory Stock Alert**\n\n`;
+      let replyText = `ðŸ“¦ **Inventory Stock Alert**\n\n`;
       if (lowStock.length === 0) {
         replyText += `All items are currently at or above healthy inventory thresholds.`;
       } else {
         replyText += `Currently **${lowStock.length} items** are at or below minimum threshold:\n\n`;
         lowStock.forEach(p => {
-          replyText += `• **${p.name}:** ${p.currentStock} units remaining (Min required: ${p.minStock})\n`;
+          replyText += `â€¢ **${p.name}:** ${p.currentStock} units remaining (Min required: ${p.minStock})\n`;
         });
         replyText += `\n*Recommendation:* Reorder from Dubai Electronics FZE or Colombo Tech Hub.`;
       }
@@ -147,12 +145,12 @@ export const StoreAssistant: React.FC = () => {
       const debtors = customers.filter(c => c.creditBalance > 0);
       const totalDebt = debtors.reduce((acc, c) => acc + c.creditBalance, 0);
 
-      let replyText = `💳 **Customer Credit Ledger Status**\n\n` +
-        `• **Total Outstanding Balance:** LKR ${totalDebt.toLocaleString()}\n` +
-        `• **Active Debtors:** ${debtors.length} customer(s)\n\n`;
+      let replyText = `ðŸ’³ **Customer Credit Ledger Status**\n\n` +
+        `â€¢ **Total Outstanding Balance:** LKR ${totalDebt.toLocaleString()}\n` +
+        `â€¢ **Active Debtors:** ${debtors.length} customer(s)\n\n`;
 
       debtors.forEach(c => {
-        replyText += `• **${c.name}** (${c.phone}): LKR ${c.creditBalance.toLocaleString()} (Limit: ${c.creditLimit.toLocaleString()})\n`;
+        replyText += `â€¢ **${c.name}** (${c.phone}): LKR ${c.creditBalance.toLocaleString()} (Limit: ${c.creditLimit.toLocaleString()})\n`;
       });
 
       setMessages(prev => [

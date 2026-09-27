@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme, ColorPalette, COLOR_PALETTE_META } from '../../context/ThemeContext';
 import { UserRole, User } from '../../types';
 import { 
   Settings, 
@@ -30,14 +31,16 @@ import {
   KeyRound,
   ShieldAlert,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Palette
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
   const { settings, updateSettings, auditLogs, products, sales, customers, showNotification, logAction } = useStore();
   const { users, addUser, updateUser, toggleUserStatus, deleteUser, resetUserPassword, currentUser } = useAuth();
+  const { colorPalette, setColorPalette, themeMode, setThemeMode } = useTheme();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'printer' | 'ai' | 'users' | 'audit' | 'backup'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'printer' | 'ai' | 'users' | 'audit' | 'backup' | 'appearance'>('profile');
 
   // Store Profile Form with Galle Defaults
   const [storeName, setStoreName] = useState(settings.storeName || 'Apple Vision');
@@ -426,6 +429,7 @@ export const SettingsView: React.FC = () => {
           { id: 'profile', label: 'Store Profile', icon: Store },
           { id: 'printer', label: 'Thermal Printer', icon: Printer },
           { id: 'ai', label: 'Gemini AI BYOK', icon: Sparkles },
+          { id: 'appearance', label: 'Appearance', icon: Palette },
           { id: 'users', label: 'Users & Permissions', icon: Users },
           { id: 'audit', label: 'Security Audit Log', icon: ShieldCheck },
           { id: 'backup', label: 'Backup & Restore', icon: Database },
@@ -448,6 +452,119 @@ export const SettingsView: React.FC = () => {
           );
         })}
       </div>
+
+      {/* APPEARANCE TAB */}
+      {activeTab === 'appearance' && (
+        <div className="p-6 rounded-3xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm space-y-8 max-w-2xl">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Palette className="w-5 h-5 text-brand-500" />
+              Color Theme
+            </h3>
+            <p className="text-xs text-light-muted dark:text-dark-muted mt-1">
+              Choose your preferred color palette. Your selection is saved automatically.
+            </p>
+          </div>
+
+          {/* Color Palette Cards */}
+          <div className="grid grid-cols-1 gap-3">
+            {(Object.entries(COLOR_PALETTE_META) as [ColorPalette, typeof COLOR_PALETTE_META[ColorPalette]][]).map(
+              ([key, meta]) => {
+                const isActive = colorPalette === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setColorPalette(key);
+                      showNotification('success', `Theme changed to "${meta.label}"`);
+                    }}
+                    className={`flex items-center gap-4 px-5 py-4 rounded-2xl border-2 text-left transition-all ${
+                      isActive
+                        ? 'border-brand-500 bg-brand-500/5 shadow-md shadow-brand-500/10'
+                        : 'border-light-border dark:border-dark-border hover:border-brand-300 dark:hover:border-brand-700'
+                    }`}
+                  >
+                    {/* Swatches */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {meta.swatches.map((color, i) => (
+                        <span
+                          key={i}
+                          className="w-6 h-6 rounded-full border border-white/20 shadow-sm"
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Label */}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-900 dark:text-white">
+                          {meta.label}
+                        </span>
+                        {isActive && (
+                          <span className="px-2 py-0.5 rounded-full bg-brand-500 text-white text-[10px] font-black uppercase tracking-wider">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-light-muted dark:text-dark-muted mt-0.5">
+                        {meta.description}
+                      </p>
+                    </div>
+
+                    {/* Check indicator */}
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                      isActive
+                        ? 'border-brand-500 bg-brand-500'
+                        : 'border-slate-300 dark:border-slate-600'
+                    }`}>
+                      {isActive && <Check className="w-3 h-3 text-white" />}
+                    </div>
+                  </button>
+                );
+              }
+            )}
+          </div>
+
+          {/* Base Dark/Light toggle â€” only shown when palette is 'default' */}
+          {colorPalette === 'default' && (
+            <div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
+                Light / Dark Mode
+              </h4>
+              <div className="flex gap-2">
+                {(['dark', 'light', 'system'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setThemeMode(mode);
+                      showNotification('success', `Switched to ${mode} mode`);
+                    }}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-bold capitalize border transition-all ${
+                      themeMode === mode
+                        ? 'bg-brand-500 border-brand-500 text-white shadow-md shadow-brand-500/25'
+                        : 'border-light-border dark:border-dark-border text-slate-600 dark:text-slate-300 hover:border-brand-300'
+                    }`}
+                  >
+                    {mode === 'dark' ? 'ðŸŒ™ Dark' : mode === 'light' ? 'â˜€ï¸ Light' : 'ðŸ–¥ System'}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-light-muted dark:text-dark-muted mt-2">
+                "System" automatically follows your Windows dark/light mode preference.
+              </p>
+            </div>
+          )}
+
+          <div className="pt-2 border-t border-light-border dark:border-dark-border">
+            <p className="text-[10px] text-light-muted dark:text-dark-muted">
+              Theme preference is saved in your browser storage and applied instantly.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 1. STORE PROFILE TAB */}
       {activeTab === 'profile' && (

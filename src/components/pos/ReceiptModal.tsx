@@ -13,7 +13,9 @@ import {
   Barcode as BarcodeIcon, 
   ExternalLink,
   ShieldCheck,
-  Repeat
+  Repeat,
+  FileText,
+  ClipboardList
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { APPLEVISION_LOGO_BASE64 } from '../../assets/logoBase64';
@@ -29,6 +31,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
   const { lastCompletedSale, settings, showNotification } = useStore();
   const receiptRef = useRef<HTMLDivElement>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isExportingA4, setIsExportingA4] = useState(false);
 
   useEffect(() => {
     if (isOpen && lastCompletedSale) {
@@ -85,7 +88,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
       box-sizing: border-box;
       -webkit-print-color-adjust: exact;
     }
-    img { max-width: 90px; height: auto; display: block; margin: 0 auto; filter: grayscale(100%); }
+    img { max-width: 90px; height: auto; display: block; margin: 0 auto; }
     .text-center { text-align: center; }
     .text-right { text-align: right; }
     .font-bold, .bold { font-weight: bold; }
@@ -162,6 +165,209 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
     window.open(`https://wa.me/${targetPhone}?text=${encoded}`, '_blank');
   };
 
+const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docType: 'INVOICE' | 'QUOTE'): string => {
+  const accentColor = docType === 'QUOTE' ? '#0ea5e9' : '#e61e25';
+  const isQuote = docType === 'QUOTE';
+  const logoSrc = APPLEVISION_LOGO_BASE64; // colored logo
+  
+  const itemRows = s.items.map((item, idx) => {
+    const bg = idx % 2 === 0 ? '#ffffff' : '#f9f9f9';
+    const discount = Number((item as any).discountAmount || (item as any).discount_amount || 0);
+    return `
+    <tr style="background:${bg};">
+      <td style="padding:10px 12px;font-size:12px;text-align:center;border-bottom:1px solid #e2e8f0;">${idx+1}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;">
+        <div style="font-weight:600;font-size:13px;color:#000;">${item.productName || (item as any).product_name || 'Apple Device'}</div>
+        ${item.imei ? `<div style="font-size:11px;color:#555;margin-top:2px;">IMEI: ${item.imei}</div>` : ''}
+        ${item.warranty && item.warranty !== 'None' ? `<div style="font-size:11px;color:#555;margin-top:1px;">Warranty: ${item.warranty}</div>` : ''}
+      </td>
+      <td style="padding:10px 12px;text-align:right;font-size:12px;color:#000;border-bottom:1px solid #e2e8f0;">Rs. ${Number(item.unitPrice||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td style="padding:10px 12px;text-align:center;font-size:12px;color:#000;border-bottom:1px solid #e2e8f0;">${item.quantity}</td>
+      <td style="padding:10px 12px;text-align:right;font-weight:700;font-size:13px;color:#000;border-bottom:1px solid #e2e8f0;">Rs. ${Number(item.lineTotal||(item as any).line_total||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    </tr>`;
+  }).join('');
+
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${docType} - ${s.invoiceNumber}</title><style>
+    @page { margin: 0; size: A4; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #000;
+      background: #f5f5f5;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      padding: 40px;
+    }
+    .container { background: #ffffff; width: 100%; min-height: 1000px; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    .top-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
+    .logo-box { background: ${accentColor}; padding: 10px; display: inline-block; margin-right: 15px; }
+    .logo-box img { max-height: 50px; max-width: 50px; object-fit: contain; filter: brightness(0) invert(1); }
+    .company-info { display: inline-block; vertical-align: top; }
+    .company-name { font-size: 20px; font-weight: bold; color: #000; }
+    .company-subtitle { font-size: 12px; color: #555; margin-top: 5px; }
+    .doc-title { font-size: 36px; font-weight: bold; color: #000; text-align: right; }
+    .doc-number { font-size: 14px; color: #555; text-align: right; margin-top: 5px; }
+    .second-row { display: flex; justify-content: space-between; margin-bottom: 30px; }
+    .bill-to h3 { font-size: 14px; color: #000; margin-bottom: 5px; }
+    .bill-to-name { font-size: 14px; color: #555; }
+    .info-boxes { display: flex; gap: 20px; }
+    .info-box { background: #f9f9f9; padding: 10px 20px; border: 1px solid #eee; }
+    .info-box-title { font-size: 11px; color: #555; margin-bottom: 5px; text-transform: uppercase; }
+    .info-box-value { font-size: 13px; font-weight: bold; color: #000; }
+    .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+    .items-table thead tr { background: ${accentColor}; color: #fff; }
+    .items-table th { padding: 12px; text-align: left; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+    .items-table th.center { text-align: center; }
+    .items-table th.right { text-align: right; }
+    .bottom-section { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 40px; }
+    .payment-info, .terms-info { flex: 1; }
+    .section-title { font-size: 12px; font-weight: bold; color: #000; margin-bottom: 10px; text-transform: uppercase; }
+    .section-text { font-size: 11px; color: #555; line-height: 1.5; }
+    .totals-box { flex: 1; max-width: 300px; }
+    .totals-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; color: #000; border-bottom: 1px solid #eee; }
+    .totals-row.grand-total { background: ${accentColor}; color: #fff; font-size: 15px; font-weight: bold; padding: 12px 15px; border: none; margin-top: 10px; }
+    .footer { display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #eee; padding-top: 20px; }
+    .manager-name { font-size: 14px; font-weight: bold; color: #000; }
+    .manager-title { font-size: 11px; color: #555; }
+    .contact-info { font-size: 11px; color: #555; margin-top: 5px; }
+    .thank-you { font-size: 16px; font-weight: bold; font-style: italic; color: ${accentColor}; }
+  </style></head><body>
+  <div class="container">
+    <div class="top-row">
+      <div>
+        <div class="logo-box"><img src="${logoSrc}" alt="Logo" /></div>
+        <div class="company-info">
+          <div class="company-name">${storeSettings.fullName || 'AppleVision Store Galle'}</div>
+          <div class="company-subtitle">Authorized Apple Reseller</div>
+        </div>
+      </div>
+      <div>
+        <div class="doc-title">${isQuote ? 'QUOTE' : 'INVOICE'}</div>
+        <div class="doc-number">${s.invoiceNumber}</div>
+      </div>
+    </div>
+    <div class="second-row">
+      <div class="bill-to">
+        <h3>${isQuote ? 'QUOTE TO:' : 'INVOICE TO:'}</h3>
+        <div class="bill-to-name">${s.customerName || 'Walk-in Customer'}</div>
+        ${s.customerPhone ? `<div class="bill-to-name">${s.customerPhone}</div>` : ''}
+      </div>
+      <div class="info-boxes">
+        <div class="info-box">
+          <div class="info-box-title">Invoice Number</div>
+          <div class="info-box-value">${s.invoiceNumber}</div>
+        </div>
+        <div class="info-box">
+          <div class="info-box-title">Date Information</div>
+          <div class="info-box-value">${s.date}</div>
+        </div>
+      </div>
+    </div>
+    <table class="items-table">
+      <thead><tr>
+        <th class="center" style="width: 50px;">NO</th>
+        <th>ITEM DESCRIPTION</th>
+        <th class="right" style="width: 120px;">PRICE</th>
+        <th class="center" style="width: 80px;">QTY</th>
+        <th class="right" style="width: 120px;">TOTAL</th>
+      </tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div class="bottom-section">
+      <div class="payment-info">
+        <div class="section-title">Payment Method</div>
+        <div class="section-text">
+          ${isQuote ? 'Cash � Bank Transfer � Card � Installment<br>Bank: Commercial Bank of Ceylon, Galle Branch<br>Account: AppleVision Store Galle' : 
+          `Method: ${s.paymentMethod}<br>Amount Paid: Rs. ${Number((s as any).amountPaid || s.totalAmount || 0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}${(s as any).bankName ? `<br>Bank: ${(s as any).bankName}` : ''}`}
+        </div>
+      </div>
+      <div class="terms-info">
+        <div class="section-title">Terms & Conditions</div>
+        <div class="section-text">
+          ${isQuote ? 'All quoted devices are genuine Apple products with valid serial numbers. Prices valid for 30 days.' : 
+          '3 Months Phone-to-Phone Replacement Warranty for device hardware defects. Warranty valid with original invoice & matching IMEI.'}
+        </div>
+      </div>
+      <div class="totals-box">
+        <div class="totals-row"><span>Sub Total</span><span>Rs. ${Number(s.subtotal||0).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
+        ${Number(s.discountTotal||0) > 0 ? `<div class="totals-row"><span>Discount</span><span>-Rs. ${Number(s.discountTotal||0).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>` : ''}
+        ${tradeInCredit > 0 ? `<div class="totals-row"><span>Trade-In Credit</span><span>-Rs. ${Number(tradeInCredit).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>` : ''}
+        <div class="totals-row grand-total"><span>Grand Total</span><span>Rs. ${Number(s.totalAmount||0).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
+      </div>
+    </div>
+    <div class="footer">
+      <div>
+        <div class="manager-name">${(storeSettings as any).managerName || s.cashierName || 'Store Manager'}</div>
+        <div class="manager-title">Store Manager</div>
+        <div class="contact-info">${storeSettings.phone || '+94 77 923 0519'} | ${storeSettings.email || 'nethminasurinda@gmail.com'}</div>
+      </div>
+      <div class="thank-you">Thank you for your business!</div>
+    </div>
+  </div>
+</body></html>`;
+};
+
+const handleDownloadA4Invoice = async () => {
+  setIsExportingA4(true);
+  try {
+    const electronAPI = (window as any).electronAPI;
+    const a4Html = buildA4InvoiceHtml(sale, settings, 'INVOICE');
+    const defaultFileName = `AppleVision_Invoice_${sale.invoiceNumber}.pdf`;
+    
+    let res;
+    if (electronAPI?.print?.toA4Pdf) {
+      res = await electronAPI.print.toA4Pdf({ html: a4Html, defaultFileName });
+    } else if (electronAPI?.print?.generateA4Invoice) {
+      const r = await electronAPI.print.generateA4Invoice({ invoiceId: sale.id, docType: 'INVOICE' });
+      if (r?.success) {
+        res = await electronAPI.print.toA4Pdf({ html: r.html, defaultFileName });
+      }
+    } else {
+      const w = window.open('', '_blank');
+      if (w) { w.document.write(a4Html); w.document.close(); w.print(); }
+      showNotification('info', 'Opened print dialog for A4 Invoice');
+      return;
+    }
+    
+    if (res?.success && !res?.data?.canceled) {
+      showNotification('success', `A4 Invoice saved: ${res.data?.filePath || defaultFileName}`);
+    } else if (!res?.data?.canceled) {
+      showNotification('error', res?.message || 'Failed to save A4 Invoice');
+    }
+  } catch (err: any) {
+    showNotification('error', `A4 Invoice failed: ${err.message}`);
+  } finally {
+    setIsExportingA4(false);
+  }
+};
+
+const handleDownloadQuote = async () => {
+  setIsExportingA4(true);
+  try {
+    const electronAPI = (window as any).electronAPI;
+    const a4Html = buildA4InvoiceHtml(sale, settings, 'QUOTE');
+    const defaultFileName = `AppleVision_Quote_${sale.invoiceNumber}.pdf`;
+    
+    if (electronAPI?.print?.toA4Pdf) {
+      const res = await electronAPI.print.toA4Pdf({ html: a4Html, defaultFileName });
+      if (res?.success && !res?.data?.canceled) {
+        showNotification('success', `Quote PDF saved: ${res.data?.filePath || defaultFileName}`);
+      } else if (!res?.data?.canceled) {
+        showNotification('error', res?.message || 'Failed to save Quote');
+      }
+    } else {
+      const w = window.open('', '_blank');
+      if (w) { w.document.write(a4Html); w.document.close(); w.print(); }
+    }
+  } catch (err: any) {
+    showNotification('error', `Quote failed: ${err.message}`);
+  } finally {
+    setIsExportingA4(false);
+  }
+};
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none">
       <div className="w-full max-w-xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
@@ -195,7 +401,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
               <img
                 src={APPLEVISION_LOGO_BASE64}
                 alt="AppleVision Store Galle"
-                className="h-12 w-auto object-contain filter grayscale contrast-125"
+                className="h-12 w-auto object-contain"
               />
             </div>
 
@@ -275,7 +481,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
             {(tradeIn || tradeInCredit > 0) && (
               <div className="border border-dashed border-slate-800 bg-slate-50 p-2.5 rounded-lg space-y-1 my-2">
                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-900">
-                  <span className="flex items-center gap-1 text-emerald-800 font-extrabold">â˜… TRADE-IN DEVICE RECEIVED</span>
+                  <span className="flex items-center gap-1 text-emerald-800 font-extrabold">★ TRADE-IN DEVICE RECEIVED</span>
                   <span className="font-mono text-emerald-700 font-extrabold">-LKR {tradeInCredit.toLocaleString()}</span>
                 </div>
                 {tradeIn && (
@@ -377,10 +583,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
               {/* 3-Month Phone-to-Phone Replacement Warranty Badge */}
               <div className="border border-slate-900 p-2 rounded-lg text-center my-1 bg-slate-50">
                 <div className="font-extrabold text-[10px] uppercase text-slate-900 tracking-tight">
-                  â˜… 3-MONTH PHONE-TO-PHONE WARRANTY â˜…
+                  ★ 3-MONTH PHONE-TO-PHONE WARRANTY ★
                 </div>
                 <div className="text-[8.5px] font-bold text-slate-800 mt-0.5">
-                  à¶¯à·”à¶»à¶šà¶®à¶±à¶ºà¶§ à¶¯à·”à¶»à¶šà¶®à¶±à¶ºà¶šà·Š à¶¸à·à¶»à·” à¶šà·’à¶»à·“à¶¸à·š à¶´à·–à¶»à·Šà¶« à·€à¶œà¶šà·“à¶¸à¶šà·Š à·ƒà·„à·’à¶­à¶ºà·’
+                  දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි
                 </div>
               </div>
 
@@ -414,6 +620,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
             >
               <Download className="w-4 h-4" />
               <span>{isExportingPdf ? 'Saving PDF...' : 'Download / Save PDF'}</span>
+            </button>
+
+            <button
+              onClick={handleDownloadA4Invoice}
+              disabled={isExportingA4}
+              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+            >
+              <FileText className="w-4 h-4" />
+              <span>{isExportingA4 ? 'Generating...' : 'A4 Invoice'}</span>
+            </button>
+
+            <button
+              onClick={handleDownloadQuote}
+              disabled={isExportingA4}
+              className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+            >
+              <ClipboardList className="w-4 h-4" />
+              <span>{isExportingA4 ? 'Generating...' : 'A4 Quote'}</span>
             </button>
 
             <button

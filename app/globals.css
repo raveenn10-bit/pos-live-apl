@@ -26,6 +26,58 @@
     --brand-primary: #e61e25;
     --brand-hover: #ff2a32;
   }
+
+  /* ─── Palette: Black & White ─── */
+  .palette-black-white {
+    --bg-primary: #000000;
+    --bg-surface: #111111;
+    --bg-elevated: #1a1a1a;
+    --border-subtle: #2a2a2a;
+    --border-strong: #3a3a3a;
+    --text-primary: #ffffff;
+    --text-muted: #aaaaaa;
+    --brand-primary: #ffffff;
+    --brand-hover: #dddddd;
+  }
+
+  /* ─── Palette: Red & Black ─── */
+  .palette-red-black {
+    --bg-primary: #080000;
+    --bg-surface: #130000;
+    --bg-elevated: #1e0000;
+    --border-subtle: #2d0000;
+    --border-strong: #440000;
+    --text-primary: #fff5f5;
+    --text-muted: #f87171;
+    --brand-primary: #e61e25;
+    --brand-hover: #ff3a40;
+  }
+
+  /* ─── Palette: White & Red ─── */
+  .palette-white-red {
+    --bg-primary: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-elevated: #fef2f2;
+    --border-subtle: #fecaca;
+    --border-strong: #fca5a5;
+    --text-primary: #0f172a;
+    --text-muted: #64748b;
+    --brand-primary: #e61e25;
+    --brand-hover: #cc141a;
+  }
+
+  /* ─── Palette: Blue, White & Grey ─── */
+  .palette-blue-grey {
+    --bg-primary: #f0f4f8;
+    --bg-surface: #ffffff;
+    --bg-elevated: #e8edf4;
+    --border-subtle: #cbd5e1;
+    --border-strong: #94a3b8;
+    --text-primary: #0f172a;
+    --text-muted: #475569;
+    --brand-primary: #2563eb;
+    --brand-hover: #1d4ed8;
+  }
 }
 
 /* Custom scrollbars */

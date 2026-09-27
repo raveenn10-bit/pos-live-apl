@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
 import { initialUsers } from '../data/initialData';
@@ -25,6 +25,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [users, setUsers] = useState<User[]>(() => {
+    if (typeof window === 'undefined') return initialUsers;
     const saved = localStorage.getItem('applevision_users');
     if (saved) {
       try {
@@ -37,6 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') return null;
     const savedUser = localStorage.getItem('applevision_current_user');
     if (savedUser) {
       try {
