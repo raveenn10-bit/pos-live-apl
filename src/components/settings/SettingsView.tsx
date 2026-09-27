@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { useAuth } from '../../context/AuthContext';
@@ -594,7 +594,7 @@ export const SettingsView: React.FC = () => {
               <Palette className="w-5 h-5 text-brand-500" />
               Color Theme
             </h3>
-            <p className="text-xs text-light-muted dark:text-dark-muted mt-1">
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
               Choose your preferred color palette. Your selection is saved automatically.
             </p>
           </div>
@@ -614,8 +614,8 @@ export const SettingsView: React.FC = () => {
                     }}
                     className={`flex items-center gap-4 px-5 py-4 rounded-2xl border-2 text-left transition-all ${
                       isActive
-                        ? 'border-brand-500 bg-brand-500/5 shadow-md shadow-brand-500/10'
-                        : 'border-light-border dark:border-dark-border hover:border-brand-300 dark:hover:border-brand-700'
+                        ? 'border-brand-500 bg-brand-500/10 shadow-md shadow-brand-500/10 dark:bg-white/5'
+                        : 'border-light-border dark:border-dark-border hover:border-brand-300 dark:hover:border-slate-500 bg-light-card dark:bg-dark-surface'
                     }`}
                   >
                     {/* Swatches */}
@@ -636,23 +636,23 @@ export const SettingsView: React.FC = () => {
                           {meta.label}
                         </span>
                         {isActive && (
-                          <span className="px-2 py-0.5 rounded-full bg-brand-500 text-white text-[10px] font-black uppercase tracking-wider">
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-black uppercase tracking-wider shadow-sm">
                             Active
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-light-muted dark:text-dark-muted mt-0.5">
+                      <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 font-medium">
                         {meta.description}
                       </p>
                     </div>
 
                     {/* Check indicator */}
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
                       isActive
-                        ? 'border-brand-500 bg-brand-500'
-                        : 'border-slate-300 dark:border-slate-600'
+                        ? 'border-emerald-500 bg-emerald-500 text-white'
+                        : 'border-slate-400 dark:border-slate-600'
                     }`}>
-                      {isActive && <Check className="w-3 h-3 text-white" />}
+                      {isActive && <Check className="w-3.5 h-3.5 text-white stroke-[3]" />}
                     </div>
                   </button>
                 );
@@ -660,7 +660,7 @@ export const SettingsView: React.FC = () => {
             )}
           </div>
 
-          {/* Base Dark/Light toggle â€” only shown when palette is 'default' */}
+          {/* Base Dark/Light toggle — only shown when palette is 'default' */}
           {colorPalette === 'default' && (
             <div>
               <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
@@ -678,21 +678,21 @@ export const SettingsView: React.FC = () => {
                     className={`flex-1 py-2.5 rounded-xl text-xs font-bold capitalize border transition-all ${
                       themeMode === mode
                         ? 'bg-brand-500 border-brand-500 text-white shadow-md shadow-brand-500/25'
-                        : 'border-light-border dark:border-dark-border text-slate-600 dark:text-slate-300 hover:border-brand-300'
+                        : 'border-light-border dark:border-dark-border text-slate-600 dark:text-slate-300 hover:border-brand-300 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
-                    {mode === 'dark' ? 'ðŸŒ™ Dark' : mode === 'light' ? 'â˜€ï¸ Light' : 'ðŸ–¥ System'}
+                    {mode === 'dark' ? '🌙 Dark' : mode === 'light' ? '☀️ Light' : '🖥️ System'}
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-light-muted dark:text-dark-muted mt-2">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">
                 "System" automatically follows your Windows dark/light mode preference.
               </p>
             </div>
           )}
 
           <div className="pt-2 border-t border-light-border dark:border-dark-border">
-            <p className="text-[10px] text-light-muted dark:text-dark-muted">
+            <p className="text-[10px] text-slate-500 dark:text-slate-400">
               Theme preference is saved in your browser storage and applied instantly.
             </p>
           </div>
