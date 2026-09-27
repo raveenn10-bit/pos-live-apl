@@ -146,6 +146,13 @@ function getInitialStorage<T>(key: string, fallback: T): T {
     if (Array.isArray(parsed) && parsed.length === 0 && Array.isArray(fallback) && fallback.length > 0) {
       return fallback;
     }
+    if (typeof fallback === 'object' && fallback !== null && !Array.isArray(fallback)) {
+      return { 
+        ...fallback, 
+        ...parsed, 
+        geminiApiKey: parsed.geminiApiKey || (fallback as any).geminiApiKey || '' 
+      };
+    }
     return parsed;
   } catch (e) {
     return fallback;

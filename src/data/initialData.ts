@@ -29,7 +29,7 @@ export const initialStoreSettings: StoreSettings = {
   receiptFooter: "WARRANTY POLICY:\n★ 3 Months Phone to Phone Replacement Warranty (දුරකථනයට දුරකථනයක් මාරු කිරීමේ වගකීමක් සහිතයි)\n• 1-Year Hardware / Software Care as stated per invoice.\n• Physical & water damage void warranty. Check device before leaving counter.",
   printerWidth: "80mm",
   autoPrint: false,
-  geminiApiKey: "",
+  geminiApiKey: "1000.fcb89275bef4e208aa9b8669ec9bc28c.36086365f06bbfab4928222dbf1caa13",
   geminiModel: "gemini-1.5-flash",
   aiConfidenceThreshold: 85,
   taxRatePercent: 0,
