@@ -14,7 +14,8 @@ import {
   BarChart3, 
   Settings,
   Phone,
-  MapPin
+  MapPin,
+  Repeat
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 
@@ -22,6 +23,7 @@ export type ActiveTab =
   | 'dashboard' 
   | 'pos' 
   | 'passport' 
+  | 'tradein'
   | 'ai' 
   | 'inventory' 
   | 'customers' 
@@ -46,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, shortcut: 'Alt+1' },
     { id: 'pos', label: 'POS Billing', icon: ShoppingCart, shortcut: 'F2', highlight: true },
     { id: 'passport', label: 'IMEI Passport', icon: Barcode, shortcut: 'F4' },
+    { id: 'tradein', label: 'Trade-In / Exchange', icon: Repeat, badge: 'Hub' },
     { id: 'ai', label: 'Gemini AI Center', icon: Sparkles, badge: 'AI', aiGlow: true },
     { id: 'inventory', label: 'Inventory', icon: Package, badge: lowStockCount > 0 ? `${lowStockCount} LOW` : undefined, badgeColor: 'bg-amber-500/20 text-amber-500 border-amber-500/30' },
     { id: 'customers', label: 'Customers & Credit', icon: Users },

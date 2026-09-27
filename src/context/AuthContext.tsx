@@ -1,5 +1,4 @@
-'use client';
-
+﻿'use client';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
 import { initialUsers } from '../data/initialData';
@@ -16,36 +15,34 @@ interface AuthContextType {
   completePasswordChange: (newPassword: string) => boolean;
   users: User[];
   addUser: (user: Omit<User, 'id'>) => void;
-  updateUser: (id: string, updates: Partial<User>) => void;
-  toggleUserStatus: (id: string) => void;
+  updateUser: (id: string, updates: Partial<User>) => { success: boolean; error?: string };
+  toggleUserStatus: (id: string) => { success: boolean; error?: string };
+  deleteUser: (id: string) => { success: boolean; error?: string };
+  resetUserPassword: (id: string, newPassword: string, newPin?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [users, setUsers] = useState<User[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('applevision_users');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (e) {
-          console.error('Failed to parse users', e);
-        }
+    const saved = localStorage.getItem('applevision_users');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse users', e);
       }
     }
     return initialUsers;
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    if (typeof window !== 'undefined') {
-      const savedUser = localStorage.getItem('applevision_current_user');
-      if (savedUser) {
-        try {
-          return JSON.parse(savedUser);
-        } catch (e) {
-          return null;
-        }
+    const savedUser = localStorage.getItem('applevision_current_user');
+    if (savedUser) {
+      try {
+        return JSON.parse(savedUser);
+      } catch (e) {
+        return null;
       }
     }
     return null;
@@ -157,6 +154,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true;
   };
 
+  const isOwnerUser = (u: User): boolean => {
+    const roleLower = String(u.role || '').toLowerCase();
+    return roleLower === 'owner' || roleLower === 'admin' || u.username.toLowerCase() === 'surinda';
+  };
+
+  const getActiveOwnerCount = (): number => {
+    return users.filter(u => isOwnerUser(u) && u.isActive !== false && u.status !== 'DISABLED' && u.status !== 'disabled').length;
+  };
+
   const addUser = (userData: Omit<User, 'id'>) => {
     const newUser: User = {
       ...userData,
@@ -165,15 +171,99 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUsers(prev => [...prev, newUser]);
   };
 
-  const updateUser = (id: string, updates: Partial<User>) => {
+  const updateUser = (id: string, updates: Partial<User>): { success: boolean; error?: string } => {
+    const target = users.find(u => u.id === id);
+    if (!target) return { success: false, error: 'User not found.' };
+
+    if (isOwnerUser(target)) {
+      const willDemote = updates.role && !['owner', 'OWNER', 'admin', 'ADMIN'].includes(updates.role);
+      const willDisable = updates.isActive === false || updates.status === 'DISABLED' || updates.status === 'disabled';
+      if ((willDemote || willDisable) && getActiveOwnerCount() <= 1) {
+        return {
+          success: false,
+          error: 'CRITICAL SECURITY VIOLATION: Cannot demote or disable the last active Owner account!'
+        };
+      }
+    }
+
     setUsers(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
     if (currentUser && currentUser.id === id) {
       setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
     }
+    return { success: true };
   };
 
-  const toggleUserStatus = (id: string) => {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
+  const toggleUserStatus = (id: string): { success: boolean; error?: string } => {
+    const target = users.find(u => u.id === id);
+    if (!target) return { success: false, error: 'User not found.' };
+
+    const isCurrentlyActive = target.isActive !== false && target.status !== 'DISABLED';
+    if (isCurrentlyActive && isOwnerUser(target)) {
+      if (getActiveOwnerCount() <= 1) {
+        return {
+          success: false,
+          error: 'CRITICAL SECURITY VIOLATION: Cannot disable the sole active Owner account!'
+        };
+      }
+    }
+
+    const nextActive = !isCurrentlyActive;
+    const nextStatus = nextActive ? 'ACTIVE' : 'DISABLED';
+
+    setUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: nextActive, status: nextStatus } : u));
+    if (currentUser && currentUser.id === id) {
+      setCurrentUser(prev => prev ? { ...prev, isActive: nextActive, status: nextStatus } : null);
+    }
+    return { success: true };
+  };
+
+  const deleteUser = (id: string): { success: boolean; error?: string } => {
+    const target = users.find(u => u.id === id);
+    if (!target) return { success: false, error: 'User not found.' };
+
+    if (isOwnerUser(target)) {
+      return {
+        success: false,
+        error: 'CRITICAL SECURITY VIOLATION: Store Owner accounts cannot be deleted!'
+      };
+    }
+
+    if (currentUser && currentUser.id === id) {
+      return { success: false, error: 'Cannot delete currently logged-in user session.' };
+    }
+
+    setUsers(prev => prev.filter(u => u.id !== id));
+    return { success: true };
+  };
+
+  const resetUserPassword = async (id: string, newPassword: string, newPin?: string): Promise<{ success: boolean; error?: string }> => {
+    const target = users.find(u => u.id === id);
+    if (!target) return { success: false, error: 'User not found.' };
+
+    if (!newPassword || newPassword.length < 4) {
+      return { success: false, error: 'New password must be at least 4 characters long.' };
+    }
+
+    try {
+      if ((window as any).electronAPI?.auth?.adminResetPassword) {
+        const numId = parseInt(id.replace(/\D/g, ''), 10) || 1;
+        await (window as any).electronAPI.auth.adminResetPassword({
+          targetUserId: numId,
+          newPassword
+        });
+      }
+    } catch (e: any) {
+      console.warn('Electron admin reset password warning:', e);
+    }
+
+    setUsers(prev => prev.map(u => u.id === id ? {
+      ...u,
+      pinCode: newPin || u.pinCode || '1234',
+      isFirstLogin: false,
+      first_login_pending: 0
+    } : u));
+
+    return { success: true };
   };
 
   return (
@@ -192,6 +282,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addUser,
         updateUser,
         toggleUserStatus,
+        deleteUser,
+        resetUserPassword,
       }}
     >
       {children}

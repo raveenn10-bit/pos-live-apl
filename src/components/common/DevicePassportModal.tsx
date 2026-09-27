@@ -1,5 +1,4 @@
 ﻿'use client';
-
 import React, { useState } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { 
@@ -17,7 +16,8 @@ import {
   ShoppingCart,
   Search,
   ExternalLink,
-  Barcode
+  Barcode,
+  Repeat
 } from 'lucide-react';
 
 interface DevicePassportModalProps {
@@ -93,9 +93,29 @@ export const DevicePassportModal: React.FC<DevicePassportModalProps> = ({
     warrantyPercent = Math.min(100, Math.max(0, (warrantyDaysRemaining / totalDays) * 100));
   }
 
-  const marginLkr = (currentDevice?.sellingPrice || 0) - (currentDevice?.costPrice || 0);
-  const marginPct = currentDevice?.sellingPrice 
-    ? Math.round((marginLkr / currentDevice.sellingPrice) * 100) 
+  // Trade-In Origin & True Cost Assessment
+  const isTradeIn = Boolean(
+    currentDevice?.isTradeIn || 
+    currentDevice?.tradeInId || 
+    currentDevice?.tradeInNumber || 
+    (currentDevice as any)?.trade_in ||
+    currentDevice?.condition?.toLowerCase().includes('grade') ||
+    currentDevice?.condition?.toLowerCase().includes('used')
+  );
+
+  const tradeInNumber = currentDevice?.tradeInNumber || (currentDevice as any)?.trade_in?.trade_in_number || currentDevice?.tradeInId;
+  const tradeInCustomer = currentDevice?.tradeInCustomerName || (currentDevice as any)?.trade_in?.customer_name;
+  const tradeInPhone = currentDevice?.tradeInCustomerPhone || (currentDevice as any)?.trade_in?.customer_phone;
+  const tradeInDate = currentDevice?.tradeInDate || (currentDevice as any)?.trade_in?.created_at;
+  const tradeInInvoice = currentDevice?.tradeInInvoiceNumber || (currentDevice as any)?.exchange_invoice?.invoice_number;
+  const acqCost = Number(currentDevice?.tradeInAcquisitionCost ?? (currentDevice as any)?.trade_in?.final_approved_value ?? currentDevice?.costPrice ?? 0);
+  const refurbCost = Number(currentDevice?.refurbishmentCost ?? (currentDevice as any)?.trade_in?.refurbishment_cost ?? 0);
+  const trueCost = Number(currentDevice?.trueCost ?? (currentDevice as any)?.trade_in?.true_cost ?? (acqCost + refurbCost));
+  const effectiveCost = isTradeIn ? trueCost : (currentDevice?.costPrice || 0);
+  const resalePrice = Number(currentDevice?.resalePrice ?? (currentDevice as any)?.trade_in?.resale_price ?? currentDevice?.sellingPrice ?? 0);
+  const marginLkr = resalePrice - effectiveCost;
+  const marginPct = resalePrice > 0 
+    ? Math.round((marginLkr / resalePrice) * 100) 
     : 0;
 
   return (
@@ -185,6 +205,12 @@ export const DevicePassportModal: React.FC<DevicePassportModalProps> = ({
 
               {/* Status and Condition Badges */}
               <div className="flex sm:flex-col items-end gap-2">
+                {isTradeIn && (
+                  <span className="px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/10 text-amber-500 border border-amber-500/30 flex items-center gap-1 shadow-sm">
+                    <Repeat className="w-3.5 h-3.5" />
+                    <span>â˜… PRE-OWNED / TRADE-IN</span>
+                  </span>
+                )}
                 <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
                   currentDevice.status === 'In Stock'
                     ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30'
@@ -262,6 +288,76 @@ export const DevicePassportModal: React.FC<DevicePassportModalProps> = ({
               </div>
             </div>
 
+            {/* Trade-In Acquisition & True Cost Dossier */}
+            {isTradeIn && (
+              <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-500">
+                    <Repeat className="w-4 h-4" />
+                    <span>Trade-In Acquisition & True Cost Dossier</span>
+                  </div>
+                  {tradeInNumber && (
+                    <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                      Ref: {tradeInNumber}
+                    </span>
+                  )}
+                </div>
+
+                {/* Origin Details */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-2.5 rounded-lg bg-light-surface/60 dark:bg-dark-surface/60 border border-light-border dark:border-dark-border space-y-1">
+                    <div className="text-[10px] font-bold uppercase text-light-muted dark:text-dark-muted">Intake Customer</div>
+                    <div className="font-semibold text-slate-900 dark:text-white">{tradeInCustomer || 'Store Trade-In Counter'}</div>
+                    <div className="font-mono text-[10px] text-light-muted dark:text-dark-muted">{tradeInPhone || 'Verified Exchange'}</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-light-surface/60 dark:bg-dark-surface/60 border border-light-border dark:border-dark-border space-y-1">
+                    <div className="text-[10px] font-bold uppercase text-light-muted dark:text-dark-muted">Intake Date / Invoice</div>
+                    <div className="font-mono font-semibold text-slate-900 dark:text-white">
+                      {tradeInDate?.slice(0, 10) || currentDevice.purchaseDate || '2026-09-25'}
+                    </div>
+                    {tradeInInvoice && (
+                      <div className="text-[10px] text-brand-500 font-mono">Original Invoice #{tradeInInvoice}</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* True Cost Financial Matrix */}
+                <div className="p-3 rounded-lg bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 mb-2">
+                    True Cost Accounting Breakdown
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div>
+                      <div className="text-[10px] text-light-muted dark:text-dark-muted">Acquisition Value</div>
+                      <div className="font-mono font-bold text-slate-900 dark:text-white">
+                        LKR {acqCost.toLocaleString()}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-light-muted dark:text-dark-muted">+ Refurbishment</div>
+                      <div className="font-mono font-bold text-amber-500">
+                        LKR {refurbCost.toLocaleString()}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-brand-500 font-bold">= True Cost</div>
+                      <div className="font-mono font-bold text-brand-500">
+                        LKR {trueCost.toLocaleString()}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-light-muted dark:text-dark-muted">
+                        {currentDevice.status === 'Sold' ? 'Realized Profit' : 'Projected Margin'}
+                      </div>
+                      <div className="font-mono font-bold text-emerald-500">
+                        +LKR {marginLkr.toLocaleString()} ({marginPct}%)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Diagnostics, Battery, Financials */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Battery Health Indicator */}
@@ -322,8 +418,13 @@ export const DevicePassportModal: React.FC<DevicePassportModalProps> = ({
                 </div>
                 <div className="text-[11px] text-light-muted dark:text-dark-muted font-mono flex items-center justify-between">
                   <span>Expires: {currentDevice.warrantyExpiryDate || 'None'}</span>
-                  <span>{currentDevice.warrantyPeriodMonths} Months Total</span>
+                  <span>{currentDevice.warrantyPeriodMonths || 3} Months</span>
                 </div>
+                {isTradeIn && (
+                  <div className="pt-1 border-t border-light-border dark:border-dark-border text-[10px] text-brand-500 font-semibold leading-tight">
+                    â˜… 3-Month Phone-to-Phone Replacement Warranty Included
+                  </div>
+                )}
               </div>
 
               {/* Financial Margin Card */}
@@ -333,15 +434,17 @@ export const DevicePassportModal: React.FC<DevicePassportModalProps> = ({
                   <span>Cost & Profit Margin</span>
                 </div>
                 <div className="flex items-center justify-between text-xs pt-1">
-                  <span className="text-light-muted dark:text-dark-muted">Cost Price:</span>
+                  <span className="text-light-muted dark:text-dark-muted">
+                    {isTradeIn ? 'True Cost:' : 'Cost Price:'}
+                  </span>
                   <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
-                    LKR {currentDevice.costPrice.toLocaleString()}
+                    LKR {effectiveCost.toLocaleString()}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-light-muted dark:text-dark-muted">Retail Price:</span>
                   <span className="font-mono font-bold text-brand-500">
-                    LKR {currentDevice.sellingPrice.toLocaleString()}
+                    LKR {resalePrice.toLocaleString()}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs pt-1 border-t border-light-border dark:border-dark-border">
@@ -417,7 +520,7 @@ export const DevicePassportModal: React.FC<DevicePassportModalProps> = ({
               {(!currentDevice.repairHistory || currentDevice.repairHistory.length === 0) ? (
                 <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-xs text-emerald-400 flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 flex-shrink-0" />
-                  <span>Clean Service History — No hardware repairs or liquid interventions recorded.</span>
+                  <span>Clean Service History â€” No hardware repairs or liquid interventions recorded.</span>
                 </div>
               ) : (
                 <div className="space-y-2">

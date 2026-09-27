@@ -1,5 +1,4 @@
 ﻿'use client';
-
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { useAuth } from '../../context/AuthContext';
@@ -26,47 +25,83 @@ import {
   FileText,
   Clock,
   FolderOpen,
-  HardDrive
+  HardDrive,
+  Edit3,
+  KeyRound,
+  ShieldAlert,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
-  const { settings, updateSettings, auditLogs, products, sales, customers, showNotification } = useStore();
-  const { users, addUser, updateUser, toggleUserStatus, currentUser } = useAuth();
+  const { settings, updateSettings, auditLogs, products, sales, customers, showNotification, logAction } = useStore();
+  const { users, addUser, updateUser, toggleUserStatus, deleteUser, resetUserPassword, currentUser } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'printer' | 'ai' | 'users' | 'audit' | 'backup'>('profile');
 
-  // Store Profile Form
-  const [storeName, setStoreName] = useState(settings.storeName);
-  const [fullName, setFullName] = useState(settings.fullName);
-  const [tagline, setTagline] = useState(settings.tagline);
-  const [owner, setOwner] = useState(settings.owner);
-  const [phone, setPhone] = useState(settings.phone);
-  const [whatsapp, setWhatsapp] = useState(settings.whatsapp);
-  const [email, setEmail] = useState(settings.email);
-  const [address, setAddress] = useState(settings.address);
-  const [city, setCity] = useState(settings.city);
-  const [taxRatePercent, setTaxRatePercent] = useState<number>(settings.taxRatePercent);
+  // Store Profile Form with Galle Defaults
+  const [storeName, setStoreName] = useState(settings.storeName || 'Apple Vision');
+  const [fullName, setFullName] = useState(settings.fullName || 'AppleVision Store Galle');
+  const [tagline, setTagline] = useState(settings.tagline || 'Reliable Best Service');
+  const [owner, setOwner] = useState(settings.owner || 'Nethmina Abayarathne');
+  const [phone, setPhone] = useState(settings.phone || '+94 77 923 0519');
+  const [whatsapp, setWhatsapp] = useState(settings.whatsapp || '+94 77 923 0519');
+  const [email, setEmail] = useState(settings.email || 'nethminasurinda@gmail.com');
+  const [address, setAddress] = useState(settings.address || 'Kalegana Junction');
+  const [city, setCity] = useState(settings.city || 'Galle');
+  const [postalCode, setPostalCode] = useState(settings.postalCode || '80000');
+  const [currency, setCurrency] = useState(settings.currency || 'Rs.');
+  const [currencySymbol, setCurrencySymbol] = useState(settings.currencySymbol || 'LKR');
+  const [taxRatePercent, setTaxRatePercent] = useState<number>(settings.taxRatePercent ?? 0);
 
   // Printer Form
-  const [printerWidth, setPrinterWidth] = useState<'80mm' | '58mm'>(settings.printerWidth);
-  const [receiptHeader, setReceiptHeader] = useState(settings.receiptHeader);
-  const [receiptFooter, setReceiptFooter] = useState(settings.receiptFooter);
-  const [autoPrint, setAutoPrint] = useState(settings.autoPrint);
+  const [printerWidth, setPrinterWidth] = useState<'80mm' | '58mm'>(settings.printerWidth || '80mm');
+  const [receiptHeader, setReceiptHeader] = useState(settings.receiptHeader || '');
+  const [receiptFooter, setReceiptFooter] = useState(settings.receiptFooter || '');
+  const [autoPrint, setAutoPrint] = useState(settings.autoPrint ?? false);
 
   // Gemini AI Form
-  const [geminiApiKey, setGeminiApiKey] = useState(settings.geminiApiKey);
+  const [geminiApiKey, setGeminiApiKey] = useState(settings.geminiApiKey || '');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [geminiModel, setGeminiModel] = useState(settings.geminiModel);
-  const [aiConfidenceThreshold, setAiConfidenceThreshold] = useState<number>(settings.aiConfidenceThreshold);
+  const [geminiModel, setGeminiModel] = useState(settings.geminiModel || 'gemini-1.5-flash');
+  const [aiConfidenceThreshold, setAiConfidenceThreshold] = useState<number>(settings.aiConfidenceThreshold || 85);
   const [isTestingAi, setIsTestingAi] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<string | null>(null);
 
-  // User Management
+  // User Management State
+  const [securityErrorBanner, setSecurityErrorBanner] = useState<string | null>(null);
+  
+  // Add User
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [newUsername, setNewUsername] = useState('');
   const [newUserName, setNewUserName] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [newUserRole, setNewUserRole] = useState<UserRole>('cashier');
   const [newUserPin, setNewUserPin] = useState('0000');
+
+  // Edit User
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserRole, setEditUserRole] = useState<UserRole>('cashier');
+  const [editUserStatus, setEditUserStatus] = useState<'ACTIVE' | 'DISABLED'>('ACTIVE');
+
+  // Reset Password
+  const [resetPasswordUser, setResetPasswordUser] = useState<User | null>(null);
+  const [newResetPassword, setNewResetPassword] = useState('');
+  const [confirmResetPassword, setConfirmResetPassword] = useState('');
+  const [newResetPin, setNewResetPin] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+
+  // Security Helper
+  const isOwner = (u: User) => {
+    const r = String(u.role || '').toLowerCase();
+    return r === 'owner' || r === 'admin' || u.username.toLowerCase() === 'surinda';
+  };
+
+  const getActiveOwnerCount = () => {
+    return users.filter(u => isOwner(u) && u.isActive !== false && u.status !== 'DISABLED' && u.status !== 'disabled').length;
+  };
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,8 +115,13 @@ export const SettingsView: React.FC = () => {
       email,
       address,
       city,
+      postalCode,
+      currency,
+      currencySymbol,
       taxRatePercent: Number(taxRatePercent),
     });
+    logAction('STORE_PROFILE_UPDATED', 'SYSTEM', `Store profile saved: ${storeName} (${fullName}) in Galle`);
+    showNotification('success', 'Store Profile updated successfully!');
   };
 
   const handleSavePrinter = (e: React.FormEvent) => {
@@ -92,6 +132,8 @@ export const SettingsView: React.FC = () => {
       receiptFooter,
       autoPrint,
     });
+    logAction('PRINTER_SETTINGS_UPDATED', 'SYSTEM', `Printer standard updated to ${printerWidth}`);
+    showNotification('success', 'Printer settings saved successfully');
   };
 
   const handleSaveAi = (e: React.FormEvent) => {
@@ -101,6 +143,8 @@ export const SettingsView: React.FC = () => {
       geminiModel,
       aiConfidenceThreshold: Number(aiConfidenceThreshold),
     });
+    logAction('AI_SETTINGS_UPDATED', 'SYSTEM', `Gemini AI configuration updated model: ${geminiModel}`);
+    showNotification('success', 'Gemini AI settings saved successfully');
   };
 
   const handleTestAiConnection = () => {
@@ -122,14 +166,150 @@ export const SettingsView: React.FC = () => {
       name: newUserName.trim(),
       role: newUserRole,
       isActive: true,
+      status: 'ACTIVE',
       isFirstLogin: false,
       pinCode: newUserPin.trim() || '1234',
     });
 
+    logAction(
+      'USER_CREATED', 
+      'AUTH', 
+      `Created operator account @${newUsername.trim().toLowerCase()} (${newUserName.trim()}) with role ${newUserRole}`
+    );
+    showNotification('success', `Created user @${newUsername.trim()}`);
+
     setIsAddUserOpen(false);
     setNewUsername('');
     setNewUserName('');
-    showNotification('success', `Created user @${newUsername.trim()}`);
+    setNewUserPassword('');
+    setNewUserPin('0000');
+  };
+
+  const handleStartEditUser = (u: User) => {
+    setSecurityErrorBanner(null);
+    setEditingUser(u);
+    setEditUserName(u.name || u.full_name || '');
+    setEditUserRole(u.role);
+    setEditUserStatus(u.isActive === false || u.status === 'DISABLED' || u.status === 'disabled' ? 'DISABLED' : 'ACTIVE');
+  };
+
+  const handleSaveEditUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setSecurityErrorBanner(null);
+
+    const willDemote = !['owner', 'OWNER', 'admin', 'ADMIN'].includes(editUserRole);
+    const willDisable = editUserStatus === 'DISABLED';
+
+    // CRITICAL SECURITY RULE: Prevent disabling or demoting the last active Owner account!
+    if (isOwner(editingUser) && (willDemote || willDisable) && getActiveOwnerCount() <= 1) {
+      const errMsg = `CRITICAL SECURITY RULE: You cannot ${willDemote ? 'demote' : 'disable'} the sole active Owner account (@${editingUser.username}) of this store!`;
+      setSecurityErrorBanner(errMsg);
+      showNotification('error', errMsg);
+      return;
+    }
+
+    const res = updateUser(editingUser.id, {
+      name: editUserName.trim(),
+      role: editUserRole,
+      isActive: editUserStatus === 'ACTIVE',
+      status: editUserStatus,
+    });
+
+    if (!res.success) {
+      setSecurityErrorBanner(res.error || 'Failed to update user.');
+      showNotification('error', res.error || 'Failed to update user');
+      return;
+    }
+
+    logAction(
+      'USER_UPDATED',
+      'AUTH',
+      `Updated user @${editingUser.username}: Role -> ${editUserRole}, Status -> ${editUserStatus}`
+    );
+    showNotification('success', `User @${editingUser.username} updated successfully!`);
+    setEditingUser(null);
+  };
+
+  const handleToggleStatus = (u: User) => {
+    setSecurityErrorBanner(null);
+    const isCurrentlyActive = u.isActive !== false && u.status !== 'DISABLED' && u.status !== 'disabled';
+
+    // CRITICAL SECURITY RULE: Prevent disabling the last active Owner account!
+    if (isCurrentlyActive && isOwner(u) && getActiveOwnerCount() <= 1) {
+      const errMsg = `CRITICAL SECURITY RULE: You cannot disable the sole active Owner account (@${u.username})!`;
+      setSecurityErrorBanner(errMsg);
+      showNotification('error', errMsg);
+      return;
+    }
+
+    const res = toggleUserStatus(u.id);
+    if (!res.success) {
+      setSecurityErrorBanner(res.error || 'Failed to toggle status');
+      showNotification('error', res.error || 'Prohibited');
+    } else {
+      const actionName = isCurrentlyActive ? 'Disabled' : 'Enabled';
+      logAction('USER_STATUS_TOGGLE', 'AUTH', `${actionName} user account @${u.username}`);
+      showNotification('success', `User @${u.username} has been ${actionName.toLowerCase()}`);
+    }
+  };
+
+  const handleStartResetPassword = (u: User) => {
+    setResetPasswordUser(u);
+    setNewResetPassword('');
+    setConfirmResetPassword('');
+    setNewResetPin(u.pinCode || '1234');
+    setShowResetPassword(false);
+  };
+
+  const handleSaveResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPasswordUser) return;
+
+    if (!newResetPassword || newResetPassword.length < 4) {
+      showNotification('error', 'New password must be at least 4 characters');
+      return;
+    }
+
+    if (newResetPassword !== confirmResetPassword) {
+      showNotification('error', 'Passwords do not match');
+      return;
+    }
+
+    const res = await resetUserPassword(resetPasswordUser.id, newResetPassword, newResetPin.trim() || undefined);
+    if (!res.success) {
+      showNotification('error', res.error || 'Failed to reset password');
+      return;
+    }
+
+    logAction('PASSWORD_RESET', 'AUTH', `Reset password and security credentials for @${resetPasswordUser.username}`);
+    showNotification('success', `Password successfully reset for @${resetPasswordUser.username}`);
+    setResetPasswordUser(null);
+    setNewResetPassword('');
+    setConfirmResetPassword('');
+    setNewResetPin('');
+  };
+
+  const handleDeleteUser = (u: User) => {
+    setSecurityErrorBanner(null);
+    if (isOwner(u)) {
+      const errMsg = 'CRITICAL SECURITY RULE: Store Owner accounts cannot be deleted!';
+      setSecurityErrorBanner(errMsg);
+      showNotification('error', errMsg);
+      return;
+    }
+
+    const confirmDelete = window.confirm(`Are you sure you want to permanently delete user @${u.username}?`);
+    if (!confirmDelete) return;
+
+    const res = deleteUser(u.id);
+    if (!res.success) {
+      setSecurityErrorBanner(res.error || 'Cannot delete user');
+      showNotification('error', res.error || 'Delete failed');
+    } else {
+      logAction('USER_DELETED', 'AUTH', `Deleted operator account @${u.username}`);
+      showNotification('success', `User @${u.username} deleted.`);
+    }
   };
 
   const [backupStatus, setBackupStatus] = useState<any>(null);
@@ -367,6 +547,47 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
 
+          <div className="grid grid-cols-4 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Postal Code</label>
+              <input
+                type="text"
+                value={postalCode}
+                onChange={(e) => setPostalCode(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Currency Prefix</label>
+              <input
+                type="text"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Currency ISO</label>
+              <input
+                type="text"
+                value={currencySymbol}
+                onChange={(e) => setCurrencySymbol(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Tax Rate (%)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={taxRatePercent}
+                onChange={(e) => setTaxRatePercent(Number(e.target.value))}
+                className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border font-mono"
+              />
+            </div>
+          </div>
+
           <div className="pt-2">
             <button
               type="submit"
@@ -545,11 +766,46 @@ export const SettingsView: React.FC = () => {
       {/* 4. USERS & PERMISSIONS TAB */}
       {activeTab === 'users' && (
         <div className="space-y-4">
+          {/* Critical Security Error Banner */}
+          {securityErrorBanner && (
+            <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 flex items-center justify-between text-xs animate-pulse">
+              <div className="flex items-center gap-3">
+                <span className="p-1.5 rounded-lg bg-rose-500/20 text-rose-500">
+                  <ShieldAlert className="w-5 h-5 flex-shrink-0" />
+                </span>
+                <div>
+                  <span className="font-extrabold uppercase tracking-wide">Owner Account Governance Protection:</span>
+                  <p className="mt-0.5 font-medium">{securityErrorBanner}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setSecurityErrorBanner(null)} 
+                className="p-1.5 hover:bg-rose-500/20 rounded-xl transition-colors"
+                title="Dismiss warning"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           <div className="flex justify-between items-center">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Store Operators & Roles</h3>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>Store Operators & Access Control</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-brand-500/10 text-brand-500 border border-brand-500/20">
+                  {users.length} Users ({getActiveOwnerCount()} Active Owner)
+                </span>
+              </h3>
+              <p className="text-xs text-light-muted dark:text-dark-muted mt-0.5">
+                Role-based access control (Owner, Manager, Cashier, Technician) with strict governance.
+              </p>
+            </div>
             <button
-              onClick={() => setIsAddUserOpen(true)}
-              className="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold shadow-sm flex items-center gap-1.5"
+              onClick={() => {
+                setSecurityErrorBanner(null);
+                setIsAddUserOpen(true);
+              }}
+              className="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold shadow-md shadow-brand-500/25 flex items-center gap-1.5 transition-all"
             >
               <UserPlus className="w-4 h-4" />
               <span>+ Add User Account</span>
@@ -564,45 +820,111 @@ export const SettingsView: React.FC = () => {
                     <th className="pb-3">Username</th>
                     <th className="pb-3">Full Name</th>
                     <th className="pb-3">Role</th>
-                    <th className="pb-3">PIN Code</th>
-                    <th className="pb-3">Last Active</th>
+                    <th className="pb-3 text-center">PIN</th>
+                    <th className="pb-3">Last Login</th>
                     <th className="pb-3 text-center">Status</th>
                     <th className="pb-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-light-border dark:divide-dark-border">
-                  {users.map((u) => (
-                    <tr key={u.id} className="hover:bg-light-surface/40 dark:hover:bg-dark-surface/40">
-                      <td className="py-3 font-mono font-bold text-slate-900 dark:text-white">@{u.username}</td>
-                      <td className="py-3 font-semibold text-slate-800 dark:text-slate-200">{u.name}</td>
-                      <td className="py-3">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-brand-500/10 text-brand-500 border border-brand-500/20">
-                          {u.role}
-                        </span>
-                      </td>
-                      <td className="py-3 font-mono text-light-muted">{u.pinCode || '1234'}</td>
-                      <td className="py-3 font-mono text-[11px] text-light-muted">{u.lastLogin || 'Never'}</td>
-                      <td className="py-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          u.isActive
-                            ? 'bg-emerald-500/10 text-emerald-500'
-                            : 'bg-red-500/10 text-red-500'
-                        }`}>
-                          {u.isActive ? 'Active' : 'Disabled'}
-                        </span>
-                      </td>
-                      <td className="py-3 text-right">
-                        {u.username !== 'surinda' && (
-                          <button
-                            onClick={() => toggleUserStatus(u.id)}
-                            className="text-xs text-light-muted hover:text-brand-500 font-semibold"
-                          >
-                            {u.isActive ? 'Disable' : 'Enable'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {users.map((u) => {
+                    const isOwnerAccount = isOwner(u);
+                    const isActive = u.isActive !== false && u.status !== 'DISABLED' && u.status !== 'disabled';
+                    const roleLower = String(u.role || '').toLowerCase();
+                    const isCurrentUser = currentUser?.id === u.id || currentUser?.username === u.username;
+
+                    return (
+                      <tr key={u.id} className="hover:bg-light-surface/40 dark:hover:bg-dark-surface/40 transition-colors">
+                        <td className="py-3 font-mono font-bold text-slate-900 dark:text-white">
+                          <div className="flex items-center gap-1.5">
+                            <span>@{u.username}</span>
+                            {isOwnerAccount && (
+                              <span title="Owner Account (Protected)">
+                                <ShieldCheck className="w-3.5 h-3.5 text-purple-500" />
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 font-semibold text-slate-800 dark:text-slate-200">
+                          {u.name || u.full_name || 'Store Operator'}
+                        </td>
+                        <td className="py-3">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                            roleLower === 'owner' || roleLower === 'admin'
+                              ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20'
+                              : roleLower === 'manager'
+                              ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+                              : roleLower === 'technician'
+                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                              : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                          }`}>
+                            {u.role}
+                          </span>
+                        </td>
+                        <td className="py-3 font-mono text-center text-light-muted font-bold">
+                          {u.pinCode || 'â€¢â€¢â€¢â€¢'}
+                        </td>
+                        <td className="py-3 font-mono text-[11px] text-light-muted">
+                          {u.lastLogin || 'Never'}
+                        </td>
+                        <td className="py-3 text-center">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            isActive
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                              : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                            {isActive ? 'Active' : 'Disabled'}
+                          </span>
+                        </td>
+                        <td className="py-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Edit Button */}
+                            <button
+                              onClick={() => handleStartEditUser(u)}
+                              title="Edit User Details & Role"
+                              className="p-1.5 rounded-lg bg-light-surface dark:bg-dark-surface hover:bg-brand-500/10 hover:text-brand-500 text-slate-600 dark:text-slate-300 border border-light-border dark:border-dark-border transition-colors"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Reset Password Button */}
+                            <button
+                              onClick={() => handleStartResetPassword(u)}
+                              title="Reset Password & PIN"
+                              className="p-1.5 rounded-lg bg-light-surface dark:bg-dark-surface hover:bg-amber-500/10 hover:text-amber-500 text-slate-600 dark:text-slate-300 border border-light-border dark:border-dark-border transition-colors"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Enable/Disable Toggle */}
+                            <button
+                              onClick={() => handleToggleStatus(u)}
+                              title={isActive ? 'Disable User' : 'Enable User'}
+                              className={`p-1.5 rounded-lg border transition-colors ${
+                                isActive
+                                  ? 'bg-rose-500/5 hover:bg-rose-500/20 text-rose-500 border-rose-500/20'
+                                  : 'bg-emerald-500/5 hover:bg-emerald-500/20 text-emerald-500 border-emerald-500/20'
+                              }`}
+                            >
+                              {isActive ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
+                            </button>
+
+                            {/* Delete User (disabled for owner) */}
+                            {!isOwnerAccount && !isCurrentUser && (
+                              <button
+                                onClick={() => handleDeleteUser(u)}
+                                title="Delete User"
+                                className="p-1.5 rounded-lg bg-light-surface dark:bg-dark-surface hover:bg-rose-500/10 hover:text-rose-500 text-slate-400 border border-light-border dark:border-dark-border transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -754,7 +1076,7 @@ export const SettingsView: React.FC = () => {
               <div className="p-3.5 rounded-2xl bg-light-surface/60 dark:bg-dark-surface/60 border border-light-border dark:border-dark-border">
                 <div className="text-[10px] uppercase font-bold text-light-muted dark:text-dark-muted">Interval Failsafe</div>
                 <div className="text-sm font-black text-emerald-500 mt-1">Every 8 Hours</div>
-                <div className="text-[10px] text-light-muted mt-0.5">Guarantees ≥2 backups daily</div>
+                <div className="text-[10px] text-light-muted mt-0.5">Guarantees â‰¥2 backups daily</div>
               </div>
               <div className="p-3.5 rounded-2xl bg-light-surface/60 dark:bg-dark-surface/60 border border-light-border dark:border-dark-border">
                 <div className="text-[10px] uppercase font-bold text-light-muted dark:text-dark-muted">Retention Policy</div>
@@ -797,7 +1119,7 @@ export const SettingsView: React.FC = () => {
                           </div>
                           <div className="text-[10px] text-light-muted flex items-center gap-2">
                             <span>{b.createdAt}</span>
-                            <span>•</span>
+                            <span>â€¢</span>
                             <span className="uppercase text-brand-500 font-bold">{b.type}</span>
                           </div>
                         </div>
@@ -814,12 +1136,17 @@ export const SettingsView: React.FC = () => {
         </div>
       )}
 
-      {/* Add User Modal */}
+      {/* 1. Add User Modal */}
       {isAddUserOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-3xl shadow-2xl p-6 space-y-4">
+          <div className="w-full max-w-md bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-3xl shadow-2xl p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-light-border dark:border-dark-border pb-3">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Operator Account</h3>
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-brand-500/10 text-brand-500">
+                  <UserPlus className="w-4 h-4" />
+                </span>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Operator Account</h3>
+              </div>
               <button onClick={() => setIsAddUserOpen(false)} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
@@ -850,18 +1177,39 @@ export const SettingsView: React.FC = () => {
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Initial Password *</label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    placeholder="Enter login password"
+                    value={newUserPassword}
+                    onChange={(e) => setNewUserPassword(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500 font-mono pr-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    {showNewPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Role</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Role *</label>
                   <select
                     value={newUserRole}
                     onChange={(e) => setNewUserRole(e.target.value as UserRole)}
                     className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500"
                   >
+                    <option value="owner">Owner / Admin</option>
+                    <option value="manager">Manager</option>
                     <option value="cashier">Cashier</option>
                     <option value="technician">Technician</option>
-                    <option value="manager">Manager</option>
-                    <option value="admin">Administrator</option>
                   </select>
                 </div>
 
@@ -878,11 +1226,178 @@ export const SettingsView: React.FC = () => {
               </div>
 
               <div className="flex items-center justify-between pt-3 border-t border-light-border dark:border-dark-border">
-                <button type="button" onClick={() => setIsAddUserOpen(false)} className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400">
+                <button type="button" onClick={() => setIsAddUserOpen(false)} className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-white">
                   Cancel
                 </button>
                 <button type="submit" className="px-6 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold shadow-md shadow-brand-500/25">
                   Create User
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Edit User Modal */}
+      {editingUser && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-3xl shadow-2xl p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-light-border dark:border-dark-border pb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
+                  <Edit3 className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Edit User: @{editingUser.username}</h3>
+                  <p className="text-[11px] text-light-muted">Update display name, assigned role, or active status.</p>
+                </div>
+              </div>
+              <button onClick={() => setEditingUser(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {isOwner(editingUser) && (
+              <div className="p-3 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-300 text-xs flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+                <span>This is an Owner account. Store security requires at least one active Owner at all times.</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditUser} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  value={editUserName}
+                  onChange={(e) => setEditUserName(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Role</label>
+                  <select
+                    value={editUserRole}
+                    onChange={(e) => setEditUserRole(e.target.value as UserRole)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500"
+                  >
+                    <option value="owner">Owner / Admin</option>
+                    <option value="manager">Manager</option>
+                    <option value="cashier">Cashier</option>
+                    <option value="technician">Technician</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Status</label>
+                  <select
+                    value={editUserStatus}
+                    onChange={(e) => setEditUserStatus(e.target.value as 'ACTIVE' | 'DISABLED')}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500"
+                  >
+                    <option value="ACTIVE">Active</option>
+                    <option value="DISABLED">Disabled</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-light-border dark:border-dark-border">
+                <button type="button" onClick={() => setEditingUser(null)} className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-white">
+                  Cancel
+                </button>
+                <button type="submit" className="px-6 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold shadow-md shadow-brand-500/25">
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Reset Password Modal */}
+      {resetPasswordUser && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-3xl shadow-2xl p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-light-border dark:border-dark-border pb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                  <KeyRound className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Reset Password: @{resetPasswordUser.username}
+                  </h3>
+                  <p className="text-[11px] text-light-muted">
+                    Set a new secure password and PIN for {resetPasswordUser.name || resetPasswordUser.username}.
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setResetPasswordUser(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveResetPassword} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  New Password * (Min 4 chars)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    placeholder="Enter new password"
+                    value={newResetPassword}
+                    onChange={(e) => setNewResetPassword(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500 font-mono pr-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword(!showResetPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    {showResetPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Confirm New Password *
+                </label>
+                <input
+                  type="password"
+                  placeholder="Re-enter new password"
+                  value={confirmResetPassword}
+                  onChange={(e) => setConfirmResetPassword(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  New 4-digit POS PIN Code
+                </label>
+                <input
+                  type="password"
+                  maxLength={4}
+                  placeholder="Optional new PIN (4 digits)"
+                  value={newResetPin}
+                  onChange={(e) => setNewResetPin(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500 font-mono text-center tracking-widest"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-light-border dark:border-dark-border">
+                <button type="button" onClick={() => setResetPasswordUser(null)} className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-white">
+                  Cancel
+                </button>
+                <button type="submit" className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md shadow-amber-500/25">
+                  Confirm Password Reset
                 </button>
               </div>
             </form>

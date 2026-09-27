@@ -26,7 +26,8 @@ import {
   Wallet, 
   BarChart3, 
   Settings,
-  ChevronRight
+  ChevronRight,
+  Repeat
 } from 'lucide-react';
 
 // View modules
@@ -40,6 +41,7 @@ import { PurchasesView } from './components/purchases/PurchasesView';
 import { ExpensesView } from './components/expenses/ExpensesView';
 import { ReportsView } from './components/reports/ReportsView';
 import { SettingsView } from './components/settings/SettingsView';
+import { TradeInView } from './components/tradein/TradeInView';
 
 const MainLayout: React.FC = () => {
   const { isAuthenticated } = useAuth();
@@ -135,6 +137,7 @@ const MainLayout: React.FC = () => {
             </div>
           )}
 
+          {activeTab === 'tradein' && <TradeInView />}
           {activeTab === 'ai' && <AiCenterView />}
           {activeTab === 'inventory' && <InventoryView />}
           {activeTab === 'customers' && <CustomersView />}
@@ -253,6 +256,7 @@ const MainLayout: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-2.5">
               {[
+                { id: 'tradein', label: 'Trade-In / Exchange', icon: Repeat, color: 'text-amber-400 bg-amber-500/10' },
                 { id: 'ai', label: 'Gemini AI Center', icon: Sparkles, color: 'text-brand-400 bg-brand-500/10' },
                 { id: 'inventory', label: 'Inventory', icon: Package, color: 'text-emerald-400 bg-emerald-500/10' },
                 { id: 'customers', label: 'Customers & Credit', icon: Users, color: 'text-blue-400 bg-blue-500/10' },
