@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { useAuth } from '../../context/AuthContext';
@@ -47,6 +47,7 @@ export const StoreAssistant: React.FC<StoreAssistantProps> = ({ compact = false 
     repairs, 
     customers, 
     expenses,
+    settings,
     updateProduct, 
     adjustStock, 
     updateRepairStatus, 
@@ -163,36 +164,74 @@ You are a professional Apple store AI assistant. Answer accurately based on this
 
     try {
       const electronAPI = (window as any).electronAPI;
-      
-      if (!electronAPI?.ai?.chat) {
-        throw new Error('AI bridge not available. Please restart the application.');
-      }
+      let replyText = '';
 
-      const storeContext = buildStoreContext();
-      const res = await electronAPI.ai.chat({ 
-        prompt: query, 
-        history: chatHistory,
-        context: storeContext
-      });
+      if (electronAPI?.ai?.chat) {
+        const storeContext = buildStoreContext();
+        const res = await electronAPI.ai.chat({ 
+          prompt: query, 
+          history: chatHistory,
+          context: storeContext
+        });
 
-      if (res?.success && res?.data) {
-        const assistantReply = res.data.text || res.data;
-        const replyText = typeof assistantReply === 'string' ? assistantReply : JSON.stringify(assistantReply);
-
-        // Update history for next turn
-        setChatHistory([
-          ...newHistory,
-          { role: 'model', parts: [{ text: replyText }] }
-        ]);
-
-        setMessages(prev => [
-          ...prev,
-          { id: `msg-${Date.now()}`, sender: 'assistant', text: replyText, timestamp: timeStr }
-        ]);
+        if (res?.success && res?.data) {
+          const assistantReply = res.data.text || res.data;
+          replyText = typeof assistantReply === 'string' ? assistantReply : JSON.stringify(assistantReply);
+        } else {
+          throw new Error(res?.message || 'AI did not return a response.');
+        }
+      } else if (settings?.geminiApiKey) {
+        // Direct Gemini REST API for web browser mode
+        const storeContext = buildStoreContext();
+        const systemPrompt = `You are the Gemini AI Copilot for AppleVision Store Galle. Use the store context below:\n\n${storeContext}`;
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${settings.geminiModel || 'gemini-1.5-flash'}:generateContent?key=${settings.geminiApiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              { role: 'user', parts: [{ text: systemPrompt }] },
+              { role: 'model', parts: [{ text: 'Understood. I am ready to answer queries using live AppleVision store data.' }] },
+              ...chatHistory,
+              { role: 'user', parts: [{ text: query }] }
+            ]
+          })
+        });
+        const resJson = await response.json();
+        replyText = resJson.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from Gemini API.';
       } else {
-        const errMsg = res?.message || 'AI did not return a response.';
-        throw new Error(errMsg);
+        // Web intelligent offline assistant responses
+        const lower = query.toLowerCase();
+        const todayStr = new Date().toISOString().substring(0, 10);
+        const todaySales = sales.filter(s => s.date === todayStr);
+        const todayRevenue = todaySales.reduce((a, s) => a + s.totalAmount, 0);
+        const todayProfit = todaySales.reduce((a, s) => a + (s.profitTotal || 0), 0);
+        const lowStock = products.filter(p => p.currentStock <= p.minStock);
+        const pendingRepairs = repairs.filter(r => !['Completed', 'Picked Up', 'Cancelled'].includes(r.status));
+        const creditCustomers = customers.filter(c => c.creditBalance > 0);
+        const totalCredit = creditCustomers.reduce((a, c) => a + c.creditBalance, 0);
+
+        if (lower.includes('sales') || lower.includes('revenue') || lower.includes('today')) {
+          replyText = `📊 **Today's Financial Overview (${todayStr}):**\n\n• **Sales Orders:** ${todaySales.length} invoice(s)\n• **Total Revenue:** LKR ${todayRevenue.toLocaleString()}\n• **Gross Profit:** LKR ${todayProfit.toLocaleString()} (${todayRevenue > 0 ? Math.round(todayProfit / todayRevenue * 100) : 0}% margin)\n• **Cash Drawer Status:** Active`;
+        } else if (lower.includes('stock') || lower.includes('low') || lower.includes('inventory')) {
+          replyText = `📦 **Inventory Stock Status:**\n\n• **Total Catalog Items:** ${products.length} products\n• **Low Stock Warnings:** ${lowStock.length} items require re-ordering:\n${lowStock.map(p => `  - **${p.name}:** Only ${p.currentStock} remaining (Min: ${p.minStock})`).join('\n') || '  - All stock levels healthy!'}`;
+        } else if (lower.includes('repair') || lower.includes('ticket')) {
+          replyText = `🔧 **Repairs Bench Status:**\n\n• **Active Tickets:** ${pendingRepairs.length} devices currently under inspection/repair.\n${pendingRepairs.slice(0, 5).map(r => `  - **${r.ticketNumber}:** ${r.deviceModel} (${r.customerName}) — *${r.status}*`).join('\n') || '  - No pending repairs at this time.'}`;
+        } else if (lower.includes('credit') || lower.includes('debt') || lower.includes('balance') || lower.includes('customer')) {
+          replyText = `💳 **Customer Credit & Receivables:**\n\n• **Total Outstanding Due:** LKR ${totalCredit.toLocaleString()}\n• **Unsettled Accounts:** ${creditCustomers.length} customer(s)\n${creditCustomers.slice(0, 5).map(c => `  - **${c.name}** (${c.phone}): Due LKR ${c.creditBalance.toLocaleString()}`).join('\n') || '  - No outstanding credit balances.'}`;
+        } else {
+          replyText = `💡 **AppleVision Intelligence Summary:**\n\n• Today's Revenue: **LKR ${todayRevenue.toLocaleString()}**\n• Active Stock Count: **${products.length} Products** (${lowStock.length} Low Stock)\n• Pending Repairs: **${pendingRepairs.length} Devices**\n• Outstanding Credit: **LKR ${totalCredit.toLocaleString()}**\n\n*(Tip: You can configure your own Gemini API key in Settings → Gemini AI for advanced natural reasoning!)*`;
+        }
       }
+
+      setChatHistory([
+        ...newHistory,
+        { role: 'model', parts: [{ text: replyText }] }
+      ]);
+
+      setMessages(prev => [
+        ...prev,
+        { id: `msg-${Date.now()}`, sender: 'assistant', text: replyText, timestamp: timeStr }
+      ]);
     } catch (err: any) {
       const errorText = err.message || 'Unknown error communicating with AI.';
       setMessages(prev => [
@@ -200,7 +239,7 @@ You are a professional Apple store AI assistant. Answer accurately based on this
         {
           id: `msg-err-${Date.now()}`,
           sender: 'assistant',
-          text: `âš ï¸ **AI Error:** ${errorText}\n\nPlease ensure your Gemini API key is configured in Settings â†’ Gemini AI tab.`,
+          text: `⚠️ **AI Notice:** ${errorText}\n\nYou can also enter your Gemini API key in Settings → Gemini AI for direct cloud execution.`,
           timestamp: timeStr,
           isError: true
         }
