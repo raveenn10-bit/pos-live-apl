@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-primary: #f5f5f7;
+    --bg-surface: #ffffff;
+    --bg-elevated: #e8e8ed;
+    --border-subtle: #e5e5ea;
+    --border-strong: #d2d2d7;
+    --text-primary: #1d1d1f;
+    --text-muted: #86868b;
+    --brand-primary: #e61e25;
+    --brand-hover: #cc141a;
+  }
+
+  .dark {
+    --bg-primary: #000000;
+    --bg-surface: #121214;
+    --bg-elevated: #1c1c1e;
+    --border-subtle: #242426;
+    --border-strong: #38383a;
+    --text-primary: #f5f5f7;
+    --text-muted: #86868b;
+    --brand-primary: #e61e25;
+    --brand-hover: #ff2a32;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(142, 142, 147, 0.3);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(142, 142, 147, 0.5);
+}
+
+/* iOS glassmorphism */
+.ios-glass {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.dark .ios-glass {
+  background: rgba(28, 28, 30, 0.75);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.ios-card {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ios-card:active {
+  transform: scale(0.98);
+}
+
+/* Thermal receipt printing styling */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #thermal-receipt-print-area,
+  #thermal-receipt-print-area * {
+    visibility: visible;
+  }
+  #thermal-receipt-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    margin: 0;
+    padding: 2mm;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    color: #000000;
+    background: #ffffff;
+  }
+}
+
+/* Apple safe area utility */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}

@@ -1,0 +1,42 @@
+{
+  "store": {
+    "name": "Apple Vision",
+    "fullName": "AppleVision Store Galle",
+    "tagline": "Reliable Best Service",
+    "owner": "Nethmina Abayarathne",
+    "category": "Mobile Phone Shop & Apple Devices",
+    "status": "Always Open"
+  },
+  "contact": {
+    "phone": "+94 77 923 0519",
+    "whatsapp": "+94 77 923 0519",
+    "email": "nethminasarinda@gmail.com",
+    "address": {
+      "street": "Kalegana Junction",
+      "city": "Galle",
+      "country": "Sri Lanka",
+      "postalCode": "80000"
+    }
+  },
+  "socialMedia": {
+    "facebook": "https://facebook.com/applevisiongalleee",
+    "instagram": "@applevision_galle",
+    "tiktok": "@applevision519"
+  },
+  "features": [
+    "Galle's Trusted Apple Store",
+    "Warranty Guaranteed",
+    "Device Exchange Service",
+    "Islandwide Delivery"
+  ],
+  "branding": {
+    "colors": {
+      "primary": "#E61E25",
+      "secondary": "#000000",
+      "backgroundDark": "#121212",
+      "textLight": "#FFFFFF",
+      "accentGray": "#8E8E93"
+    },
+    "logoPath": "assets/logo.jpg"
+  }
+}
