@@ -42,6 +42,7 @@ import { ExpensesView } from './components/expenses/ExpensesView';
 import { ReportsView } from './components/reports/ReportsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { TradeInView } from './components/tradein/TradeInView';
+import { FloatingAssistant } from './components/ai/FloatingAssistant';
 
 const MainLayout: React.FC = () => {
   const { isAuthenticated } = useAuth();
@@ -350,6 +351,7 @@ const MainLayout: React.FC = () => {
         onOpenImeiSearch={() => setIsPassportModalOpen(true)}
       />
 
+      <FloatingAssistant />
       <ToastContainer />
     </div>
   );

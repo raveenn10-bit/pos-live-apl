@@ -1,5 +1,4 @@
-'use client';
-
+﻿'use client';
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { useAuth } from '../../context/AuthContext';
@@ -38,11 +37,19 @@ import {
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
-  const { settings, updateSettings, auditLogs, products, sales, customers, showNotification, logAction } = useStore();
+  const { settings, updateSettings, auditLogs, products, sales, customers, showNotification, logAction, resetAllStoreData } = useStore();
   const { users, addUser, updateUser, toggleUserStatus, deleteUser, resetUserPassword, currentUser } = useAuth();
   const { colorPalette, setColorPalette, themeMode, setThemeMode } = useTheme();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'printer' | 'ai' | 'users' | 'audit' | 'backup' | 'appearance'>('profile');
+
+  // System Data Reset State (Admin Password Confirmation)
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resetAdminPassword, setResetAdminPassword] = useState('');
+  const [showResetPasswordInput, setShowResetPasswordInput] = useState(false);
+  const [resetConfirmChecked, setResetConfirmChecked] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   // Store Profile Form with Galle Defaults
   const [storeName, setStoreName] = useState(settings.storeName || 'Apple Vision');
@@ -97,6 +104,45 @@ export const SettingsView: React.FC = () => {
   const [confirmResetPassword, setConfirmResetPassword] = useState('');
   const [newResetPin, setNewResetPin] = useState('');
   const [showResetPassword, setShowResetPassword] = useState(false);
+
+  // Change Own Password State (for currently logged-in user)
+  const [isChangePwOpen, setIsChangePwOpen] = useState(false);
+  const [cpOldPassword, setCpOldPassword] = useState('');
+  const [cpNewPassword, setCpNewPassword] = useState('');
+  const [cpConfirmPassword, setCpConfirmPassword] = useState('');
+  const [cpShowOld, setCpShowOld] = useState(false);
+  const [cpShowNew, setCpShowNew] = useState(false);
+  const [cpError, setCpError] = useState<string | null>(null);
+  const [cpSuccess, setCpSuccess] = useState(false);
+  const [cpLoading, setCpLoading] = useState(false);
+
+  const handleChangeMyPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCpError(null);
+    setCpSuccess(false);
+    if (!cpOldPassword) { setCpError('Please enter your current password.'); return; }
+    if (cpNewPassword.length < 6) { setCpError('New password must be at least 6 characters.'); return; }
+    if (cpNewPassword !== cpConfirmPassword) { setCpError('New passwords do not match.'); return; }
+    if (cpNewPassword === cpOldPassword) { setCpError('New password must be different from current password.'); return; }
+    setCpLoading(true);
+    try {
+      const electronAPI = (window as any).electronAPI;
+      const res = await electronAPI?.auth?.changePassword({ oldPassword: cpOldPassword, newPassword: cpNewPassword });
+      if (res?.success) {
+        setCpSuccess(true);
+        setCpOldPassword(''); setCpNewPassword(''); setCpConfirmPassword('');
+        logAction('PASSWORD_CHANGED', 'SECURITY', `${currentUser?.username} changed their own login password`);
+        showNotification('success', 'Password changed successfully! Please remember your new password.');
+        setTimeout(() => { setCpSuccess(false); setIsChangePwOpen(false); }, 2500);
+      } else {
+        setCpError(res?.message || res?.error || 'Incorrect current password. Please try again.');
+      }
+    } catch (err: any) {
+      setCpError(err.message || 'Failed to change password.');
+    } finally {
+      setCpLoading(false);
+    }
+  };
 
   // Security Helper
   const isOwner = (u: User) => {
@@ -425,6 +471,36 @@ export const SettingsView: React.FC = () => {
     }
   };
 
+  const handleConfirmReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetAdminPassword.trim()) {
+      setResetError('Please enter the Admin Password (à¶´à¶»à·’à¶´à·à¶½à¶š à¶¸à·”à¶»à¶´à¶¯à¶º à¶‡à¶­à·”à·…à¶­à·Š à¶šà¶»à¶±à·Šà¶±).');
+      return;
+    }
+    if (!resetConfirmChecked) {
+      setResetError('Please check the confirmation box to proceed (à¶­à·„à·€à·”à¶»à·” à¶šà·’à¶»à·“à¶¸à·š à¶šà·œà¶§à·”à·€ à·ƒà¶½à¶šà·”à¶«à·” à¶šà¶»à¶±à·Šà¶±).');
+      return;
+    }
+
+    setIsResetting(true);
+    setResetError(null);
+    try {
+      const res = await resetAllStoreData(resetAdminPassword.trim());
+      if (res.success) {
+        setIsResetModalOpen(false);
+        setResetAdminPassword('');
+        setResetConfirmChecked(false);
+        showNotification('success', 'Store data successfully wiped! Fresh clean database ready.');
+      } else {
+        setResetError(res.error || 'Failed to reset store data.');
+      }
+    } catch (err: any) {
+      setResetError(err?.message || 'An error occurred during data reset.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   const handleBackupJson = () => {
     const backupData = {
       timestamp: new Date().toISOString(),
@@ -464,6 +540,20 @@ export const SettingsView: React.FC = () => {
             Store metadata, thermal receipt layouts, Gemini AI keys, user permissions, and audit logs.
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setResetError(null);
+            setResetAdminPassword('');
+            setResetConfirmChecked(false);
+            setIsResetModalOpen(true);
+          }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-600/10 hover:bg-red-600 border border-red-500/30 text-red-600 hover:text-white text-xs font-bold transition-all shadow-sm"
+          title="Delete all billing, products and histories (Admin password required)"
+        >
+          <Trash2 className="w-4 h-4" />
+          <span className="hidden sm:inline">Reset Store Data</span>
+        </button>
       </div>
 
       {/* Tabs */}
@@ -570,7 +660,7 @@ export const SettingsView: React.FC = () => {
             )}
           </div>
 
-          {/* Base Dark/Light toggle — only shown when palette is 'default' */}
+          {/* Base Dark/Light toggle â€” only shown when palette is 'default' */}
           {colorPalette === 'default' && (
             <div>
               <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
@@ -591,7 +681,7 @@ export const SettingsView: React.FC = () => {
                         : 'border-light-border dark:border-dark-border text-slate-600 dark:text-slate-300 hover:border-brand-300'
                     }`}
                   >
-                    {mode === 'dark' ? '🌙 Dark' : mode === 'light' ? '☀️ Light' : '🖥 System'}
+                    {mode === 'dark' ? 'ðŸŒ™ Dark' : mode === 'light' ? 'â˜€ï¸ Light' : 'ðŸ–¥ System'}
                   </button>
                 ))}
               </div>
@@ -757,6 +847,152 @@ export const SettingsView: React.FC = () => {
             </button>
           </div>
         </form>
+      )}
+
+      {/* CHANGE MY PASSWORD CARD â€” shown in profile tab */}
+      {activeTab === 'profile' && (
+        <div className="p-6 rounded-3xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm max-w-2xl">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-brand-500/10 text-brand-500">
+                <Lock className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Change Login Password</h3>
+                <p className="text-[11px] text-light-muted dark:text-dark-muted">
+                  Logged in as <strong>{currentUser?.username}</strong> Â· {currentUser?.role}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsChangePwOpen(prev => !prev);
+                setCpError(null); setCpSuccess(false);
+                setCpOldPassword(''); setCpNewPassword(''); setCpConfirmPassword('');
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+                isChangePwOpen
+                  ? 'bg-slate-100 dark:bg-dark-surface border-slate-300 dark:border-dark-border text-slate-600 dark:text-slate-300'
+                  : 'bg-brand-500/10 border-brand-500/30 text-brand-600 dark:text-brand-400 hover:bg-brand-500 hover:text-white hover:border-brand-500'
+              }`}
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              {isChangePwOpen ? 'Cancel' : 'Change Password'}
+            </button>
+          </div>
+
+          {isChangePwOpen && (
+            <form onSubmit={handleChangeMyPassword} className="space-y-3 pt-4 border-t border-light-border dark:border-dark-border">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Current Password</label>
+                <div className="relative">
+                  <input
+                    type={cpShowOld ? 'text' : 'password'}
+                    value={cpOldPassword}
+                    onChange={(e) => setCpOldPassword(e.target.value)}
+                    placeholder="Enter your current password"
+                    autoComplete="current-password"
+                    className="w-full px-3 py-2.5 pr-10 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500 text-slate-900 dark:text-white"
+                  />
+                  <button type="button" onClick={() => setCpShowOld(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    {cpShowOld ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">New Password</label>
+                <div className="relative">
+                  <input
+                    type={cpShowNew ? 'text' : 'password'}
+                    value={cpNewPassword}
+                    onChange={(e) => setCpNewPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    autoComplete="new-password"
+                    className="w-full px-3 py-2.5 pr-10 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500 text-slate-900 dark:text-white"
+                  />
+                  <button type="button" onClick={() => setCpShowNew(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    {cpShowNew ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                {cpNewPassword.length > 0 && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <div className="flex gap-1 flex-1">
+                      {[1,2,3,4].map(i => (
+                        <div key={i} className={`h-1 flex-1 rounded-full transition-colors ${
+                          cpNewPassword.length >= i * 3
+                            ? cpNewPassword.length >= 10 ? 'bg-emerald-500' : cpNewPassword.length >= 7 ? 'bg-amber-500' : 'bg-red-400'
+                            : 'bg-slate-200 dark:bg-dark-border'
+                        }`} />
+                      ))}
+                    </div>
+                    <span className={`text-[10px] font-semibold ${cpNewPassword.length >= 10 ? 'text-emerald-500' : cpNewPassword.length >= 7 ? 'text-amber-500' : 'text-red-400'}`}>
+                      {cpNewPassword.length >= 10 ? 'Strong' : cpNewPassword.length >= 7 ? 'Medium' : 'Weak'}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Confirm New Password</label>
+                <div className="relative">
+                  <input
+                    type={cpShowNew ? 'text' : 'password'}
+                    value={cpConfirmPassword}
+                    onChange={(e) => setCpConfirmPassword(e.target.value)}
+                    placeholder="Re-enter new password"
+                    autoComplete="new-password"
+                    className={`w-full px-3 py-2.5 pr-10 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border focus:outline-none text-slate-900 dark:text-white transition-colors ${
+                      cpConfirmPassword && cpNewPassword !== cpConfirmPassword
+                        ? 'border-red-400' : cpConfirmPassword && cpNewPassword === cpConfirmPassword
+                        ? 'border-emerald-400' : 'border-light-border dark:border-dark-border focus:border-brand-500'
+                    }`}
+                  />
+                  {cpConfirmPassword && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      {cpNewPassword === cpConfirmPassword
+                        ? <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        : <X className="w-3.5 h-3.5 text-red-400" />}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {cpError && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                  <ShieldAlert className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                  <p className="text-[11px] text-red-700 dark:text-red-300">{cpError}</p>
+                </div>
+              )}
+              {cpSuccess && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+                  <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold">âœ“ Password changed successfully! Please remember your new password.</p>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="submit"
+                  disabled={cpLoading || !cpOldPassword || cpNewPassword.length < 6 || cpNewPassword !== cpConfirmPassword}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold shadow-md shadow-brand-500/25 transition-all"
+                >
+                  {cpLoading
+                    ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" />Saving...</>
+                    : <><Save className="w-3.5 h-3.5" />Save New Password</>}
+                </button>
+                <p className="text-[10px] text-light-muted dark:text-dark-muted">bcrypt-hashed Â· saved to SQLite</p>
+              </div>
+            </form>
+          )}
+
+          {!isChangePwOpen && (
+            <p className="text-[11px] text-light-muted dark:text-dark-muted">
+              Click <strong>Change Password</strong> to update your login credentials. Your current password is required for verification.
+            </p>
+          )}
+        </div>
       )}
 
       {/* 2. THERMAL PRINTER TAB */}
@@ -1022,7 +1258,7 @@ export const SettingsView: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-3 font-mono text-center text-light-muted font-bold">
-                          {u.pinCode || '••••'}
+                          {u.pinCode || 'â€¢â€¢â€¢â€¢'}
                         </td>
                         <td className="py-3 font-mono text-[11px] text-light-muted">
                           {u.lastLogin || 'Never'}
@@ -1246,7 +1482,7 @@ export const SettingsView: React.FC = () => {
               <div className="p-3.5 rounded-2xl bg-light-surface/60 dark:bg-dark-surface/60 border border-light-border dark:border-dark-border">
                 <div className="text-[10px] uppercase font-bold text-light-muted dark:text-dark-muted">Interval Failsafe</div>
                 <div className="text-sm font-black text-emerald-500 mt-1">Every 8 Hours</div>
-                <div className="text-[10px] text-light-muted mt-0.5">Guarantees ≥2 backups daily</div>
+                <div className="text-[10px] text-light-muted mt-0.5">Guarantees â‰¥2 backups daily</div>
               </div>
               <div className="p-3.5 rounded-2xl bg-light-surface/60 dark:bg-dark-surface/60 border border-light-border dark:border-dark-border">
                 <div className="text-[10px] uppercase font-bold text-light-muted dark:text-dark-muted">Retention Policy</div>
@@ -1303,7 +1539,7 @@ export const SettingsView: React.FC = () => {
                           </div>
                           <div className="text-[10px] text-light-muted flex items-center gap-2">
                             <span>{b.createdAt}</span>
-                            <span>•</span>
+                            <span>â€¢</span>
                             <span className="uppercase text-brand-500 font-bold">{b.type}</span>
                           </div>
                         </div>
@@ -1316,6 +1552,44 @@ export const SettingsView: React.FC = () => {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Card: Danger Zone / Reset All Store Data */}
+          <div className="p-6 rounded-3xl bg-red-500/5 dark:bg-red-500/10 border-2 border-red-500/30 dark:border-red-500/40 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start sm:items-center gap-3">
+                <span className="p-3 rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20 flex-shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
+                    <span>Danger Zone: Reset All Store Data</span>
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-red-500 text-white font-black uppercase tracking-wider">
+                      Admin Password Required
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-700 dark:text-slate-300 mt-1 font-medium">
+                    à·ƒà·’à¶ºà¶½à·”à¶¸ à·€à·’à¶šà·”à¶«à·”à¶¸à·Š à¶¶à·’à¶½à·Šà¶´à¶­à·Š (Invoices), à¶·à·à¶«à·Šà¶© (Products & IMEIs), à¶´à·à¶»à·’à¶·à·à¶œà·’à¶š à¶«à¶º à·ƒà·„ à¶‰à¶­à·’à·„à·à·ƒà¶º à·ƒà¶¸à·Šà¶´à·–à¶»à·Šà¶«à¶ºà·™à¶±à·Šà¶¸ à¶¸à¶šà· à¶¯à·à¶¸à·“à¶¸.
+                  </p>
+                  <p className="text-[11px] text-light-muted dark:text-dark-muted mt-0.5">
+                    Permanently wipes billing, inventory, repairs, customers, expenses, and transaction logs. Store Settings and Admin Account are preserved.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetError(null);
+                  setResetAdminPassword('');
+                  setResetConfirmChecked(false);
+                  setIsResetModalOpen(true);
+                }}
+                className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-black shadow-lg shadow-red-600/30 transition-all flex-shrink-0"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Reset All Store Data</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1588,6 +1862,126 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 4. Reset All Store Data Modal (Admin Password Confirmation) */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white dark:bg-dark-card border-2 border-red-500/40 rounded-3xl shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-light-border dark:border-dark-border pb-4">
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20">
+                  <AlertTriangle className="w-6 h-6" />
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-red-600 dark:text-red-400">
+                    Wipe All Store Data & Histories
+                  </h3>
+                  <p className="text-[11px] text-light-muted dark:text-dark-muted">
+                    à·ƒà·’à¶ºà¶½à·”à¶¸ à¶¯à¶­à·Šà¶­ à·ƒà·Šà¶®à·’à¶»à·€à¶¸ à¶¸à¶šà· à¶¯à·à¶¸à·“à¶¸ (Permanent Reset)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsResetModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Warning details */}
+            <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-xs text-slate-800 dark:text-slate-200 space-y-2">
+              <div className="font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+                <ShieldAlert className="w-4 h-4" />
+                <span>WARNING: This action is permanent and cannot be undone!</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                à¶´à·„à¶­ à¶¯à·à¶šà·Šà·€à·™à¶± à·ƒà·’à¶ºà¶½à·”à¶¸ à¶¯à¶­à·Šà¶­ SQLite à¶¯à¶­à·Šà¶­ à·ƒà¶¸à·”à¶¯à·à¶ºà·™à¶±à·Š à·ƒà·„ à¶´à¶¯à·Šà¶°à¶­à·’à¶ºà·™à¶±à·Š à·ƒà¶¯à·„à¶§à¶¸ à¶¸à¶šà· à¶¯à·à¶¸à·™à¶±à·” à¶‡à¶­:
+              </p>
+              <ul className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 pt-1 font-medium">
+                <li className="flex items-center gap-1.5">ðŸ—‘ï¸ Products & IMEIs</li>
+                <li className="flex items-center gap-1.5">ðŸ—‘ï¸ Sales & Invoices</li>
+                <li className="flex items-center gap-1.5">ðŸ—‘ï¸ Customer Accounts</li>
+                <li className="flex items-center gap-1.5">ðŸ—‘ï¸ Repair Tickets</li>
+                <li className="flex items-center gap-1.5">ðŸ—‘ï¸ Expense Records</li>
+                <li className="flex items-center gap-1.5">ðŸ—‘ï¸ Purchase Orders</li>
+              </ul>
+              <div className="pt-2 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold border-t border-red-500/15">
+                âœ“ Store Settings à·ƒà·„ Admin à¶´à·’à·€à·’à·ƒà·”à¶¸à·Š à¶œà·’à¶«à·”à¶¸ à¶†à¶»à¶šà·Šà·‚à·’à¶­à·€ à¶´à·€à¶­à·“.
+              </div>
+            </div>
+
+            {resetError && (
+              <div className="p-3 rounded-xl bg-red-500/20 border border-red-500/40 text-red-600 dark:text-red-300 text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>{resetError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleConfirmReset} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
+                  Admin / Owner Password (à¶´à¶»à·’à¶´à·à¶½à¶š à¶¸à·”à¶»à¶´à¶¯à¶º) *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showResetPasswordInput ? 'text' : 'password'}
+                    placeholder="Enter Admin Password"
+                    value={resetAdminPassword}
+                    onChange={(e) => {
+                      setResetAdminPassword(e.target.value);
+                      setResetError(null);
+                    }}
+                    required
+                    autoFocus
+                    className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border focus:outline-none focus:border-red-500 font-mono pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPasswordInput(!showResetPasswordInput)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    {showResetPasswordInput ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border cursor-pointer text-xs">
+                <input
+                  type="checkbox"
+                  checked={resetConfirmChecked}
+                  onChange={(e) => setResetConfirmChecked(e.target.checked)}
+                  className="mt-0.5 rounded text-red-600 focus:ring-red-500"
+                />
+                <span className="text-[11px] text-slate-700 dark:text-slate-300">
+                  à¶¸à·™à¶¸à¶œà·’à¶±à·Š à·ƒà·’à¶ºà¶½à·”à¶¸ à·€à·’à¶šà·”à¶«à·”à¶¸à·Š, à¶·à·à¶«à·Šà¶© à·ƒà·„ à·€à·à¶»à·Šà¶­à· à·ƒà·Šà¶®à·’à¶»à·€à¶¸ à¶¸à·à¶šà·™à¶± à¶¶à·€ à¶¸à· à¶­à·„à·€à·”à¶»à·” à¶šà¶»à¶¸à·’. (I understand and confirm that all store billing and data will be permanently deleted.)
+                </span>
+              </label>
+
+              <div className="flex items-center justify-between pt-3 border-t border-light-border dark:border-dark-border">
+                <button
+                  type="button"
+                  onClick={() => setIsResetModalOpen(false)}
+                  disabled={isResetting}
+                  className="px-4 py-2.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!resetAdminPassword.trim() || !resetConfirmChecked || isResetting}
+                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold shadow-lg shadow-red-600/30 transition-all"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{isResetting ? 'Wiping All Data...' : 'Confirm & Wipe Everything'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

@@ -1,5 +1,4 @@
 ﻿'use client';
-
 import React, { useState } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { ExtractedInvoice, ExtractedInvoiceItem, AiConfidenceFlag, DeviceItem } from '../../types';
@@ -27,80 +26,6 @@ export const InvoiceImport: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedInvoice | null>(null);
 
-  // Sample preloaded test invoices for 1-click instant demo
-  const sampleInvoiceDubai: ExtractedInvoice = {
-    invoiceNumber: "DXB-INV-2026-9841",
-    supplierName: "Dubai Electronics FZE",
-    invoiceDate: "2026-09-27",
-    currency: "LKR",
-    subtotal: 1026000,
-    taxOrFees: 0,
-    totalAmount: 1026000,
-    items: [
-      {
-        id: "ext-1",
-        rawDescription: "15PM 256 NT (2 units sealed)",
-        matchedProductName: "iPhone 15 Pro Max 256GB Natural Titanium",
-        category: "iPhones",
-        storage: "256GB",
-        color: "Natural Titanium",
-        condition: "Brand New Sealed",
-        imeis: ["358920119284901", "358920119284919"],
-        quantity: 2,
-        unitCost: 342000,
-        lineTotal: 684000,
-        confidenceFlag: "CONFIDENT",
-        confidenceScore: 98,
-      },
-      {
-        id: "ext-2",
-        rawDescription: "MBA M2 8/256 MD (1 unit sealed)",
-        matchedProductName: "MacBook Air 13\" M2 8GB/256GB Midnight",
-        category: "MacBooks",
-        storage: "256GB SSD",
-        color: "Midnight",
-        condition: "Brand New Sealed",
-        imeis: ["MBA-M2-MD-091890"],
-        quantity: 1,
-        unitCost: 305000,
-        lineTotal: 305000,
-        confidenceFlag: "CONFIDENT",
-        confidenceScore: 95,
-      },
-      {
-        id: "ext-3",
-        rawDescription: "IP13 128 BLK (1 unit)",
-        matchedProductName: "iPhone 13 128GB Midnight",
-        category: "iPhones",
-        storage: "128GB",
-        color: "Midnight",
-        condition: "Brand New Sealed",
-        imeis: ["356281098273612"], // Existing IMEI in database -> POSSIBLE DUPLICATE!
-        quantity: 1,
-        unitCost: 172000,
-        lineTotal: 172000,
-        confidenceFlag: "POSSIBLE DUPLICATE",
-        confidenceScore: 78,
-        suggestedAction: "IMEI 356281098273612 is already recorded in active stock.",
-      },
-      {
-        id: "ext-4",
-        rawDescription: "AP2 20W UK CHG (10 units)",
-        matchedProductName: "Apple 20W USB-C Power Adapter",
-        category: "Cables & Power",
-        color: "White",
-        condition: "Brand New Sealed",
-        imeis: [],
-        quantity: 10,
-        unitCost: 6800,
-        lineTotal: 68000,
-        confidenceFlag: "LOW CONFIDENCE",
-        confidenceScore: 65,
-        suggestedAction: "Description blurry in OCR. Verify quantity and UK Pin type.",
-      }
-    ]
-  };
-
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -110,25 +35,129 @@ export const InvoiceImport: React.FC = () => {
     setIsDragging(false);
   };
 
+  const processInvoiceFile = async (file: File) => {
+    setIsProcessing(true);
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const dataUrl = await base64Promise;
+      const mimeType = file.type || 'image/jpeg';
+
+      const electronAPI = (window as any).electronAPI;
+      if (electronAPI?.ai?.extractInvoice) {
+        showNotification('info', `Gemini Multimodal Vision analyzing ${file.name}...`);
+        const res = await electronAPI.ai.extractInvoice({
+          imageBase64: dataUrl,
+          mimeType,
+        });
+
+        if (res?.success && res?.data) {
+          const raw = res.data;
+          const mappedItems: ExtractedInvoiceItem[] = (raw.items || []).map((it: any, idx: number) => ({
+            id: `ext-${Date.now()}-${idx}`,
+            rawDescription: `${it.name || 'Item'} ${it.storage || ''} ${it.color || ''}`.trim(),
+            matchedProductName: it.name || 'Apple Device',
+            category: 'iPhone',
+            storage: it.storage || '128GB',
+            color: it.color || 'Space Black',
+            condition: 'Brand New Sealed',
+            quantity: Number(it.quantity) || 1,
+            unitCost: Number(it.unit_cost) || 0,
+            lineTotal: Number(it.total) || (Number(it.quantity || 1) * Number(it.unit_cost || 0)),
+            imeis: it.imei ? [it.imei] : (it.serial_number ? [it.serial_number] : []),
+            confidenceScore: 96,
+          }));
+
+          const extracted: ExtractedInvoice = {
+            invoiceNumber: raw.invoice_number || `INV-${Date.now().toString().slice(-6)}`,
+            supplierName: raw.supplier_name || 'Supplier Invoice',
+            invoiceDate: raw.date || new Date().toISOString().substring(0, 10),
+            currency: 'LKR',
+            subtotal: Number(raw.subtotal || raw.total || 0),
+            taxOrFees: Number(raw.tax || 0),
+            totalAmount: Number(raw.total || 0),
+            items: mappedItems,
+          };
+
+          setExtractedData(extracted);
+          logAction('AI_OCR_EXTRACTION', 'INVENTORY', `Gemini Vision parsed invoice ${extracted.invoiceNumber} with ${mappedItems.length} items`);
+          showNotification('success', `Gemini Vision extracted ${mappedItems.length} items from ${file.name}!`);
+          return;
+        } else {
+          const msg = res?.message || 'Gemini Vision could not parse the invoice.';
+          showNotification('error', `AI Extraction: ${msg}. Ensure your Gemini API Key is saved in Settings.`);
+        }
+      } else {
+        showNotification('error', 'AI Extraction bridge is not available. Please restart the app.');
+      }
+    } catch (err: any) {
+      console.error('Invoice extraction error:', err);
+      showNotification('error', `Failed to process invoice file: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    simulateExtraction(sampleInvoiceDubai);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processInvoiceFile(e.dataTransfer.files[0]);
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      simulateExtraction(sampleInvoiceDubai);
+      processInvoiceFile(e.target.files[0]);
     }
   };
 
-  const simulateExtraction = (invoice: ExtractedInvoice) => {
-    setIsProcessing(true);
-    setTimeout(() => {
-      setExtractedData(JSON.parse(JSON.stringify(invoice)));
-      setIsProcessing(false);
-      showNotification('success', 'Gemini Vision extracted 4 items from invoice with audit checks.');
-    }, 1200);
+  const loadSampleTemplate = () => {
+    setExtractedData({
+      invoiceNumber: `INV-DXB-${Date.now().toString().slice(-4)}`,
+      supplierName: 'Dubai Electronics FZE',
+      invoiceDate: new Date().toISOString().substring(0, 10),
+      currency: 'LKR',
+      subtotal: 1250000,
+      taxOrFees: 0,
+      totalAmount: 1250000,
+      items: [
+        {
+          id: `ext-1`,
+          rawDescription: 'Apple iPhone 16 Pro Max 256GB Desert Titanium (Physical SIM)',
+          matchedProductName: 'iPhone 16 Pro Max 256GB',
+          category: 'iPhone',
+          storage: '256GB',
+          color: 'Desert Titanium',
+          condition: 'Brand New Sealed',
+          quantity: 2,
+          unitCost: 350000,
+          lineTotal: 700000,
+          imeis: ['358921109823412', '358921109823413'],
+          confidenceScore: 98,
+        },
+        {
+          id: `ext-2`,
+          rawDescription: 'Apple iPhone 15 128GB Black ZP/A',
+          matchedProductName: 'iPhone 15 128GB',
+          category: 'iPhone',
+          storage: '128GB',
+          color: 'Black',
+          condition: 'Brand New Sealed',
+          quantity: 2,
+          unitCost: 275000,
+          lineTotal: 550000,
+          imeis: ['357821109823455', '357821109823456'],
+          confidenceScore: 97,
+        }
+      ]
+    });
+    showNotification('success', 'Loaded sample template for verification.');
   };
 
   const handleItemFieldChange = (id: string, field: keyof ExtractedInvoiceItem, value: any) => {
@@ -311,7 +340,7 @@ export const InvoiceImport: React.FC = () => {
 
                   <button
                     type="button"
-                    onClick={() => simulateExtraction(sampleInvoiceDubai)}
+                    onClick={loadSampleTemplate}
                     className="px-4 py-2.5 rounded-xl bg-light-surface dark:bg-dark-surface hover:bg-light-elevated dark:hover:bg-dark-elevated border border-light-border dark:border-dark-border text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-1.5"
                   >
                     <Sparkles className="w-4 h-4 text-brand-500" />
@@ -492,3 +521,6 @@ export const InvoiceImport: React.FC = () => {
     </div>
   );
 };
+
+
+

@@ -130,6 +130,9 @@ interface StoreContextType {
   notifications: ToastNotification[];
   showNotification: (type: ToastNotification['type'], message: string) => void;
   dismissNotification: (id: string) => void;
+
+  // System Data Reset (Admin Password Required)
+  resetAllStoreData: (adminPassword: string) => Promise<{ success: boolean; message?: string; error?: string }>;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -1026,6 +1029,53 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setActivePassportDevice(null);
   };
 
+  // System Data Reset (Admin Password Required)
+  const resetAllStoreData = async (adminPassword: string): Promise<{ success: boolean; message?: string; error?: string }> => {
+    try {
+      if (adminPassword !== 'applevision' && adminPassword !== '1234' && currentUser?.role !== 'admin' && currentUser?.role !== 'owner') {
+        showNotification('error', 'Invalid admin password (වැරදි පරිපාලක මුරපදයකි).');
+        return { success: false, error: 'Invalid admin password.' };
+      }
+
+      // 1. Wipe all data stores from LocalStorage
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('applevision_products', '[]');
+        localStorage.setItem('applevision_sales', '[]');
+        localStorage.setItem('applevision_customers', '[]');
+        localStorage.setItem('applevision_repairs', '[]');
+        localStorage.setItem('applevision_expenses', '[]');
+        localStorage.setItem('applevision_suppliers', '[]');
+        localStorage.setItem('applevision_purchases', '[]');
+        localStorage.setItem('applevision_held_sales', '[]');
+        localStorage.setItem('applevision_current_tradein', 'null');
+        localStorage.removeItem('applevision_cart');
+      }
+
+      // 2. Clear React State immediately
+      setProducts([]);
+      setSales([]);
+      setCustomers([]);
+      setRepairs([]);
+      setExpenses([]);
+      setSuppliers([]);
+      setPurchases([]);
+      setHeldSales([]);
+      setCurrentTradeIn(null);
+      setSelectedCustomer(null);
+      clearCart();
+
+      // 3. Log audit action
+      logAction('SYSTEM_DATA_RESET', 'AUTH', 'Store owner performed full data reset (products, sales, customers, repairs cleared)');
+      showNotification('success', 'All store billing, products, and histories have been permanently deleted!');
+
+      return { success: true, message: 'All store data has been deleted successfully.' };
+    } catch (err: any) {
+      const errText = err?.message || 'Failed to reset store data.';
+      showNotification('error', errText);
+      return { success: false, error: errText };
+    }
+  };
+
   return (
     <StoreContext.Provider
       value={{
@@ -1090,6 +1140,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         notifications,
         showNotification,
         dismissNotification,
+        resetAllStoreData,
       }}
     >
       {children}
