@@ -11,10 +11,7 @@ import {
   CheckCircle2, 
   Phone, 
   MapPin, 
-  Barcode as BarcodeIcon, 
-  ExternalLink,
   ShieldCheck,
-  Repeat,
   FileText,
   ClipboardList
 } from 'lucide-react';
@@ -30,16 +27,15 @@ interface ReceiptModalProps {
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onNewSale }) => {
   const { lastCompletedSale, settings, showNotification } = useStore();
-  const receiptRef = useRef<HTMLDivElement>(null);
+  const invoiceDocRef = useRef<HTMLDivElement>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
-  const [isExportingA4, setIsExportingA4] = useState(false);
+  const [isExportingQuote, setIsExportingQuote] = useState(false);
 
   useEffect(() => {
     if (isOpen && lastCompletedSale) {
-      // Trigger canvas-confetti celebration fireworks!
       try {
         confetti({
-          particleCount: 80,
+          particleCount: 75,
           spread: 70,
           origin: { y: 0.6 },
           colors: ['#e61e25', '#10b981', '#3b82f6', '#f59e0b', '#ffffff'],
@@ -50,19 +46,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
     }
   }, [isOpen, lastCompletedSale]);
 
-  if (!isOpen || !lastCompletedSale) return null;
-
-  const sale = lastCompletedSale;
-  const tradeIn = sale.tradeInRecord || (sale as any).tradeIn || (sale as any).trade_in;
-  const tradeInCredit = sale.tradeInCredit || tradeIn?.finalApprovedValue || tradeIn?.final_approved_value || 0;
-
-  // Keyboard Shortcuts: Ctrl+P for 80mm print, F2 for next sale, Escape to close
+  // Keyboard Shortcuts: Ctrl+P for PDF print, F2 for next sale, Escape to close
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
-        handlePrint();
+        handlePrintPdf();
       } else if (e.key === 'F2') {
         e.preventDefault();
         onClose();
@@ -75,6 +65,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
+
+  if (!isOpen || !lastCompletedSale) return null;
+
+  const sale = lastCompletedSale;
+  const tradeIn = sale.tradeInRecord || (sale as any).tradeIn || (sale as any).trade_in;
+  const tradeInCredit = sale.tradeInCredit || tradeIn?.finalApprovedValue || tradeIn?.final_approved_value || 0;
 
   const cleanSriLankanPhone = (rawPhone?: string): string => {
     if (!rawPhone) return '';
@@ -143,259 +139,49 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
     }
   };
 
-  const build80mmReceiptHtml = (s: typeof sale, storeSettings: typeof settings): string => {
+  const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docType: 'INVOICE' | 'QUOTE'): string => {
+    const accentColor = docType === 'QUOTE' ? '#0ea5e9' : '#e61e25';
+    const isQuote = docType === 'QUOTE';
+    const logoSrc = APPLEVISION_LOGO_BASE64;
+    
     const barcodeSvg = generateCode128Svg(s.invoiceNumber, {
-      height: 38,
+      height: 42,
       showText: true,
       fontSize: 10,
-      lineColor: '#000000',
+      lineColor: '#0f172a',
       backgroundColor: 'transparent'
     });
 
-    const tradeInRec = s.tradeInRecord || (s as any).tradeIn || (s as any).trade_in;
-    const tradeCredit = s.tradeInCredit || tradeInRec?.finalApprovedValue || tradeInRec?.final_approved_value || 0;
+    const tradeInRecord = s.tradeInRecord || (s as any).tradeIn || (s as any).trade_in;
+    const tradeInCred = s.tradeInCredit || tradeInRecord?.finalApprovedValue || tradeInRecord?.final_approved_value || 0;
 
     const itemRows = s.items.map((item, idx) => {
-      const imei = item.imei ? `<div style="font-size:9.5px;color:#333;margin-top:2px;">IMEI: <strong>${item.imei}</strong></div>` : '';
-      const warranty = item.warranty && item.warranty !== 'None' ? `<div style="font-size:9.5px;color:#047857;font-weight:bold;">★ ${item.warranty}</div>` : '';
+      const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+      const unitPrice = Number(item.unitPrice || 0);
+      const lineTotal = Number(item.lineTotal || (item as any).line_total || (item.quantity * unitPrice));
+      const imei = item.imei || '';
+      const warranty = item.warranty && item.warranty !== 'None' ? item.warranty : '3 Months AppleVision Warranty';
       return `
-        <div style="margin-bottom:7px;border-bottom:1px dotted #ccc;padding-bottom:5px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div style="font-weight:bold;font-size:11.5px;max-width:190px;">${item.productName || 'Apple Device'}</div>
-            <div style="font-weight:bold;font-size:11.5px;text-align:right;">Rs. ${Number(item.lineTotal || 0).toLocaleString()}</div>
+      <tr style="background:${bg};">
+        <td style="padding:10px 12px;font-size:11px;text-align:center;color:#64748b;border-bottom:1px solid #e2e8f0;font-weight:600;">${String(idx+1).padStart(2, '0')}.</td>
+        <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;">
+          <div style="font-weight:700;font-size:13px;color:#0f172a;letter-spacing:-0.2px;">${item.productName || (item as any).product_name || 'Apple Device'}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px;">
+            ${imei ? `<span style="font-family:'Courier New',Courier,monospace;font-size:10px;background:#f1f5f9;color:#334155;padding:2px 7px;border-radius:4px;border:1px solid #cbd5e1;font-weight:700;">IMEI: ${imei}</span>` : ''}
+            <span style="font-size:10px;font-weight:700;color:#059669;background:#ecfdf5;padding:2px 7px;border-radius:4px;border:1px solid #a7f3d0;">✓ ${warranty}</span>
           </div>
-          ${imei}
-          ${warranty}
-          <div style="font-size:10px;color:#555;margin-top:2px;">
-            ${item.quantity} x Rs. ${Number(item.unitPrice || 0).toLocaleString()}
-          </div>
-        </div>
-      `;
+        </td>
+        <td style="padding:10px 12px;text-align:right;font-size:12px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">Rs. ${unitPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        <td style="padding:10px 12px;text-align:center;font-size:12px;color:#0f172a;font-weight:700;border-bottom:1px solid #e2e8f0;">${item.quantity}</td>
+        <td style="padding:10px 12px;text-align:right;font-weight:800;font-size:13px;color:#0f172a;border-bottom:1px solid #e2e8f0;">Rs. ${lineTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      </tr>`;
     }).join('');
 
     return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Receipt - ${s.invoiceNumber}</title>
-  <style>
-    @page { margin: 0; size: 80mm auto; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Courier New', Courier, monospace, -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 11px;
-      line-height: 1.35;
-      color: #000000;
-      background: #ffffff;
-      width: 80mm;
-      max-width: 80mm;
-      padding: 4mm 3mm 8mm 3mm;
-      margin: 0 auto;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
-    }
-    .text-center { text-align: center; }
-    .text-right { text-align: right; }
-    .font-bold { font-weight: bold; }
-    .dashed-line { border-top: 1px dashed #000; margin: 8px 0; }
-    .flex-between { display: flex; justify-content: space-between; align-items: center; margin: 2px 0; }
-    .warranty-box { border: 1.5px solid #000; padding: 6px; border-radius: 6px; text-align: center; margin: 8px 0; background: #fbfbfb; }
-  </style>
-</head>
-<body>
-  <div class="text-center" style="margin-bottom:6px;">
-    <img src="${APPLEVISION_LOGO_BASE64}" alt="AppleVision Logo" style="max-height:48px;max-width:140px;margin:0 auto;display:block;" />
-  </div>
-  <div class="text-center" style="margin-bottom:6px;">
-    <div style="font-size:14px;font-weight:900;letter-spacing:-0.3px;text-transform:uppercase;">${storeSettings.fullName || 'AppleVision Store Galle'}</div>
-    <div style="font-size:10px;font-weight:bold;margin-top:1px;">${storeSettings.tagline || 'Reliable Best Service'}</div>
-    <div style="font-size:9.5px;color:#333;margin-top:2px;">
-      ${storeSettings.address || 'Kalegana Junction'}, ${storeSettings.city || 'Galle'}<br>
-      Hotline: ${storeSettings.phone || '+94 77 923 0519'}
-    </div>
-  </div>
-  <div class="dashed-line"></div>
-  <div style="font-size:10px;">
-    <div class="flex-between">
-      <span>INVOICE #:</span>
-      <span class="font-bold">${s.invoiceNumber}</span>
-    </div>
-    <div class="flex-between">
-      <span>DATE &amp; TIME:</span>
-      <span>${s.date} ${s.time || ''}</span>
-    </div>
-    <div class="flex-between">
-      <span>CASHIER:</span>
-      <span>${s.cashierName || 'Staff'}</span>
-    </div>
-    <div class="flex-between">
-      <span>CUSTOMER:</span>
-      <span class="font-bold">${s.customerName || 'Walk-in Customer'}</span>
-    </div>
-    ${s.customerPhone ? `<div class="flex-between"><span>PHONE:</span><span>${s.customerPhone}</span></div>` : ''}
-  </div>
-  <div class="dashed-line"></div>
-  <div>${itemRows}</div>
-  <div class="dashed-line"></div>
-  <div style="font-size:11px;">
-    <div class="flex-between">
-      <span>SUBTOTAL:</span>
-      <span>Rs. ${Number(s.subtotal || 0).toLocaleString()}</span>
-    </div>
-    ${Number(s.discountTotal || 0) > 0 ? `<div class="flex-between font-bold"><span>DISCOUNT:</span><span>-Rs. ${Number(s.discountTotal || 0).toLocaleString()}</span></div>` : ''}
-    ${tradeCredit > 0 ? `<div class="flex-between font-bold"><span>TRADE-IN CREDIT:</span><span>-Rs. ${Number(tradeCredit).toLocaleString()}</span></div>` : ''}
-    <div class="flex-between" style="font-size:14px;font-weight:900;border-top:1px solid #000;border-bottom:1px solid #000;padding:4px 0;margin:6px 0;">
-      <span>NET TOTAL:</span>
-      <span>Rs. ${Number(s.totalAmount || 0).toLocaleString()}</span>
-    </div>
-  </div>
-  <div style="font-size:10px;margin-top:4px;">
-    <div class="flex-between font-bold">
-      <span>PAID VIA:</span>
-      <span>${s.paymentMethod || 'Cash'}</span>
-    </div>
-    ${s.paymentDetails?.cashTendered !== undefined ? `
-    <div class="flex-between"><span>CASH TENDERED:</span><span>Rs. ${Number(s.paymentDetails.cashTendered).toLocaleString()}</span></div>
-    <div class="flex-between font-bold"><span>CHANGE DUE:</span><span>Rs. ${Number(s.paymentDetails.changeDue || 0).toLocaleString()}</span></div>` : ''}
-    ${s.paymentDetails?.cardRef ? `<div class="flex-between"><span>CARD AUTH:</span><span>${s.paymentDetails.cardRef}</span></div>` : ''}
-  </div>
-  <div class="dashed-line"></div>
-  <div class="text-center" style="margin:8px 0;">
-    ${barcodeSvg}
-  </div>
-  <div class="warranty-box">
-    <div style="font-size:10px;font-weight:900;text-transform:uppercase;">★ 3-MONTH PHONE-TO-PHONE WARRANTY ★</div>
-    <div style="font-size:9.5px;font-weight:bold;margin-top:2px;">දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි</div>
-  </div>
-  <div class="text-center" style="font-size:9px;color:#333;margin-top:6px;line-height:1.4;">
-    <div>${storeSettings.receiptHeader || 'Thank you for shopping at AppleVision Store Galle!'}</div>
-    <div style="font-weight:bold;margin-top:2px;">${storeSettings.receiptFooter || 'Warranty valid only with original invoice.'}</div>
-    <div style="font-size:8.5px;color:#777;margin-top:6px;">*** REVOLUTIONIZING APPLE RETAIL IN GALLE ***</div>
-  </div>
-</body>
-</html>`;
-  };
-
-  const handlePrint = () => {
-    showNotification('info', 'Opening 80mm thermal receipt print...');
-    const receiptHtml = build80mmReceiptHtml(sale, settings);
-    printHtmlViaIframe(receiptHtml);
-  };
-
-  const handleDownloadPdf = async () => {
-    setIsExportingPdf(true);
-    try {
-      const receiptHtml = build80mmReceiptHtml(sale, settings);
-      const defaultFileName = `AppleVision_Receipt_${sale.invoiceNumber}.html`;
-
-      const electronAPI = (window as any).electronAPI;
-      if (electronAPI?.print?.toPdf) {
-        const res = await electronAPI.print.toPdf({
-          html: receiptHtml,
-          defaultFileName: `AppleVision_Receipt_${sale.invoiceNumber}.pdf`,
-        });
-        if (res?.success && !res?.data?.canceled) {
-          showNotification('success', `Receipt PDF saved: ${res.data?.filePath || defaultFileName}`);
-          return;
-        }
-      }
-
-      // Web Mode: Open isolated print/PDF preview and download standalone file
-      printHtmlViaIframe(receiptHtml);
-      downloadHtmlFile(defaultFileName, receiptHtml);
-      showNotification('success', 'Receipt opened in print dialog and saved to Downloads!');
-    } catch (err: any) {
-      console.error('PDF export error:', err);
-      showNotification('error', `PDF generation failed: ${err.message || 'Unknown error'}`);
-    } finally {
-      setIsExportingPdf(false);
-    }
-  };
-
-  const handleWhatsApp = () => {
-    let text = `*${settings.fullName || 'AppleVision Store Galle'}*\n`;
-    text += `Kalegana Junction, Galle\n`;
-    text += `Hotline: ${settings.phone || '+94 77 923 0519'}\n`;
-    text += `--------------------------------\n`;
-    text += `*INVOICE: #${sale.invoiceNumber}*\n`;
-    text += `Date: ${sale.date} ${sale.time || ''}\n`;
-    text += `Customer: ${sale.customerName || 'Valued Customer'}\n`;
-    text += `--------------------------------\n`;
-    sale.items.forEach((item, idx) => {
-      text += `${idx + 1}. *${item.productName}*\n`;
-      if (item.imei) text += `   • IMEI: ${item.imei}\n`;
-      if (item.warranty && item.warranty !== 'None') text += `   • Warranty: ${item.warranty}\n`;
-      text += `   • Qty: ${item.quantity} x LKR ${item.unitPrice.toLocaleString()} = LKR ${item.lineTotal.toLocaleString()}\n`;
-    });
-    if (tradeInCredit > 0) {
-      text += `--------------------------------\n`;
-      text += `*Trade-In Credit:* -LKR ${tradeInCredit.toLocaleString()}\n`;
-    }
-    text += `--------------------------------\n`;
-    text += `*Subtotal:* LKR ${sale.subtotal.toLocaleString()}\n`;
-    if (sale.discountTotal > 0) text += `*Discount:* -LKR ${sale.discountTotal.toLocaleString()}\n`;
-    text += `*TOTAL PAID:* LKR ${sale.totalAmount.toLocaleString()}\n`;
-    text += `*Payment Method:* ${sale.paymentMethod || 'Cash'}\n`;
-    text += `--------------------------------\n`;
-    text += `*★ 3-Month Phone-to-Phone Replacement Warranty Included*\n`;
-    text += `(දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි)\n`;
-    text += `Thank you for choosing AppleVision Store Galle!`;
-
-    const encoded = encodeURIComponent(text);
-    const targetPhone = cleanSriLankanPhone(sale.customerPhone);
-
-    const waUrl = targetPhone 
-      ? `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encoded}`
-      : `https://api.whatsapp.com/send?text=${encoded}`;
-
-    window.open(waUrl, '_blank');
-    showNotification('success', targetPhone ? `Dispatching WhatsApp invoice to ${targetPhone}...` : 'Opening WhatsApp to choose recipient...');
-  };
-
-const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docType: 'INVOICE' | 'QUOTE'): string => {
-  const accentColor = docType === 'QUOTE' ? '#0ea5e9' : '#e61e25';
-  const isQuote = docType === 'QUOTE';
-  const logoSrc = APPLEVISION_LOGO_BASE64;
-  
-  const barcodeSvg = generateCode128Svg(s.invoiceNumber, {
-    height: 44,
-    showText: true,
-    fontSize: 11,
-    lineColor: '#0f172a',
-    backgroundColor: 'transparent'
-  });
-
-  const tradeInRecord = s.tradeInRecord || (s as any).tradeIn || (s as any).trade_in;
-  const tradeInCredit = s.tradeInCredit || tradeInRecord?.finalApprovedValue || tradeInRecord?.final_approved_value || 0;
-
-  const itemRows = s.items.map((item, idx) => {
-    const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
-    const discount = Number((item as any).discountAmount || (item as any).discount_amount || 0);
-    const unitPrice = Number(item.unitPrice || 0);
-    const lineTotal = Number(item.lineTotal || (item as any).line_total || (item.quantity * unitPrice));
-    const imei = item.imei || '';
-    const warranty = item.warranty && item.warranty !== 'None' ? item.warranty : '3 Months AppleVision Warranty';
-    return `
-    <tr style="background:${bg};">
-      <td style="padding:10px 12px;font-size:11px;text-align:center;color:#64748b;border-bottom:1px solid #e2e8f0;font-weight:600;">${String(idx+1).padStart(2, '0')}.</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;">
-        <div style="font-weight:700;font-size:13px;color:#0f172a;letter-spacing:-0.2px;">${item.productName || (item as any).product_name || 'Apple Device'}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px;">
-          ${imei ? `<span style="font-family:'Courier New',Courier,monospace;font-size:10px;background:#f1f5f9;color:#334155;padding:2px 7px;border-radius:4px;border:1px solid #cbd5e1;font-weight:700;">IMEI: ${imei}</span>` : ''}
-          <span style="font-size:10px;font-weight:700;color:#059669;background:#ecfdf5;padding:2px 7px;border-radius:4px;border:1px solid #a7f3d0;">✓ ${warranty}</span>
-        </div>
-      </td>
-      <td style="padding:10px 12px;text-align:right;font-size:12px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">Rs. ${unitPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-      <td style="padding:10px 12px;text-align:center;font-size:12px;color:#0f172a;font-weight:700;border-bottom:1px solid #e2e8f0;">${item.quantity}</td>
-      <td style="padding:10px 12px;text-align:right;font-weight:800;font-size:13px;color:#0f172a;border-bottom:1px solid #e2e8f0;">Rs. ${lineTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-    </tr>`;
-  }).join('');
-
-  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>${docType} - ${s.invoiceNumber}</title>
+  <title>${docType === 'QUOTE' ? 'Quotation' : 'Invoice'} - ${s.invoiceNumber}</title>
   <style>
     @page {
       margin: 10mm 12mm 10mm 12mm;
@@ -467,7 +253,7 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
       text-align: right;
     }
     .doc-main-title {
-      font-size: 34px;
+      font-size: 32px;
       font-weight: 900;
       letter-spacing: 2px;
       color: #0f172a;
@@ -504,8 +290,8 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
       display: flex;
       justify-content: space-between;
       gap: 20px;
-      margin-top: 22px;
-      margin-bottom: 22px;
+      margin-top: 20px;
+      margin-bottom: 20px;
     }
     .bill-to-card {
       flex: 1.1;
@@ -764,7 +550,6 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
 </head>
 <body>
   <div class="page-wrapper">
-    <!-- Top Header -->
     <div class="header-row">
       <div class="brand-group">
         <img src="${logoSrc}" alt="AppleVision Logo" class="brand-logo-img" />
@@ -786,7 +571,6 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
       </div>
     </div>
 
-    <!-- Second Row: Customer Details & Transaction Card (Reference Style) -->
     <div class="second-row">
       <div class="bill-to-card">
         <div class="card-label">INVOICE TO:</div>
@@ -821,7 +605,6 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
       </div>
     </div>
 
-    <!-- Items Table -->
     <table class="items-table">
       <thead>
         <tr>
@@ -837,8 +620,7 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
       </tbody>
     </table>
 
-    <!-- Trade-In Device Received (if any) -->
-    ${tradeInCredit > 0 ? `
+    ${tradeInCred > 0 ? `
     <div class="trade-in-card">
       <div style="display:flex;align-items:center;">
         <span class="trade-in-badge">★ TRADE-IN TAKEN</span>
@@ -851,15 +633,13 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
         </span>
       </div>
       <div class="trade-in-val">
-        Credit Deducted: -Rs. ${Number(tradeInCredit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        Credit Deducted: -Rs. ${Number(tradeInCred).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </div>
     </div>
     ` : ''}
 
-    <!-- Bottom Section: Payment / Terms on Left, Totals on Right -->
     <div class="bottom-layout">
       <div class="bottom-left">
-        <!-- Payment & Bank Details -->
         <div class="payment-box">
           <div class="box-heading">Payment Information &amp; Bank Details</div>
           <div class="payment-content">
@@ -870,7 +650,6 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
           </div>
         </div>
 
-        <!-- Warranty & Guarantee Policy -->
         <div class="warranty-box">
           <div class="warranty-title">★ 3-Month Phone-to-Phone Replacement Warranty ★</div>
           <div class="warranty-sinhala">දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි</div>
@@ -882,7 +661,6 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
           </div>
         </div>
 
-        <!-- Barcode Verification -->
         <div class="barcode-panel">
           <div class="barcode-label">Scan to Verify Official Invoice</div>
           ${barcodeSvg}
@@ -890,7 +668,6 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
       </div>
 
       <div class="bottom-right">
-        <!-- Totals Container -->
         <div class="totals-container">
           <div class="totals-line">
             <span>Sub Total</span>
@@ -901,10 +678,10 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
             <span>Discount</span>
             <span style="font-weight:700;">-Rs. ${Number(s.discountTotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>` : ''}
-          ${tradeInCredit > 0 ? `
+          ${tradeInCred > 0 ? `
           <div class="totals-line" style="color: #16a34a;">
             <span>Trade-In Credit</span>
-            <span style="font-weight:700;">-Rs. ${Number(tradeInCredit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span style="font-weight:700;">-Rs. ${Number(tradeInCred).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>` : ''}
           <div class="totals-line">
             <span>Tax / VAT (0%)</span>
@@ -918,7 +695,6 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
       </div>
     </div>
 
-    <!-- Footer: Manager Signature, Thank You & Store Tagline -->
     <div class="footer-strip">
       <div class="sign-area">
         <div class="sign-line"></div>
@@ -937,350 +713,446 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
   </div>
 </body>
 </html>`;
-};
+  };
 
-const handleDownloadA4Invoice = async () => {
-  setIsExportingA4(true);
-  try {
+  const handlePrintPdf = () => {
+    showNotification('info', 'Opening official Invoice PDF for printing...');
     const a4Html = buildA4InvoiceHtml(sale, settings, 'INVOICE');
-    const defaultFileName = `AppleVision_Invoice_${sale.invoiceNumber}.html`;
-    const electronAPI = (window as any).electronAPI;
-    
-    if (electronAPI?.print?.toA4Pdf) {
-      const res = await electronAPI.print.toA4Pdf({ html: a4Html, defaultFileName: `AppleVision_Invoice_${sale.invoiceNumber}.pdf` });
-      if (res?.success && !res?.data?.canceled) {
-        showNotification('success', `A4 Invoice saved: ${res.data?.filePath || defaultFileName}`);
-        return;
-      }
-    } else if (electronAPI?.print?.generateA4Invoice) {
-      const r = await electronAPI.print.generateA4Invoice({ invoiceId: sale.id, docType: 'INVOICE' });
-      if (r?.success && electronAPI?.print?.toA4Pdf) {
-        const res = await electronAPI.print.toA4Pdf({ html: r.html, defaultFileName: `AppleVision_Invoice_${sale.invoiceNumber}.pdf` });
+    printHtmlViaIframe(a4Html);
+  };
+
+  const handleDownloadPdf = async () => {
+    setIsExportingPdf(true);
+    try {
+      const a4Html = buildA4InvoiceHtml(sale, settings, 'INVOICE');
+      const defaultFileName = `AppleVision_Invoice_${sale.invoiceNumber}.html`;
+      const electronAPI = (window as any).electronAPI;
+
+      if (electronAPI?.print?.toA4Pdf) {
+        const res = await electronAPI.print.toA4Pdf({ 
+          html: a4Html, 
+          defaultFileName: `AppleVision_Invoice_${sale.invoiceNumber}.pdf` 
+        });
         if (res?.success && !res?.data?.canceled) {
-          showNotification('success', `A4 Invoice saved: ${res.data?.filePath || defaultFileName}`);
+          showNotification('success', `A4 Invoice PDF saved: ${res.data?.filePath || defaultFileName}`);
           return;
         }
       }
-    }
-    
-    // Web Mode: Open isolated print/PDF preview and download standalone file
-    printHtmlViaIframe(a4Html);
-    downloadHtmlFile(defaultFileName, a4Html);
-    showNotification('success', 'A4 Invoice opened for printing & saved to Downloads!');
-  } catch (err: any) {
-    showNotification('error', `A4 Invoice failed: ${err.message}`);
-  } finally {
-    setIsExportingA4(false);
-  }
-};
 
-const handleDownloadQuote = async () => {
-  setIsExportingA4(true);
-  try {
-    const a4Html = buildA4InvoiceHtml(sale, settings, 'QUOTE');
-    const defaultFileName = `AppleVision_Quote_${sale.invoiceNumber}.html`;
-    const electronAPI = (window as any).electronAPI;
-    
-    if (electronAPI?.print?.toA4Pdf) {
-      const res = await electronAPI.print.toA4Pdf({ html: a4Html, defaultFileName: `AppleVision_Quote_${sale.invoiceNumber}.pdf` });
-      if (res?.success && !res?.data?.canceled) {
-        showNotification('success', `Quote PDF saved: ${res.data?.filePath || defaultFileName}`);
-        return;
-      }
+      // Web Mode: Open isolated print/PDF preview and download standalone printable file
+      printHtmlViaIframe(a4Html);
+      downloadHtmlFile(defaultFileName, a4Html);
+      showNotification('success', 'Invoice PDF ready! Save as PDF dialog opened and downloaded.');
+    } catch (err: any) {
+      console.error('PDF export error:', err);
+      showNotification('error', `PDF generation failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsExportingPdf(false);
     }
-    
-    // Web Mode: Open isolated print/PDF preview and download standalone file
-    printHtmlViaIframe(a4Html);
-    downloadHtmlFile(defaultFileName, a4Html);
-    showNotification('success', 'A4 Quote opened for printing & saved to Downloads!');
-  } catch (err: any) {
-    showNotification('error', `Quote failed: ${err.message}`);
-  } finally {
-    setIsExportingA4(false);
-  }
-};
+  };
+
+  const handleDownloadQuote = async () => {
+    setIsExportingQuote(true);
+    try {
+      const a4Html = buildA4InvoiceHtml(sale, settings, 'QUOTE');
+      const defaultFileName = `AppleVision_Quote_${sale.invoiceNumber}.html`;
+      const electronAPI = (window as any).electronAPI;
+
+      if (electronAPI?.print?.toA4Pdf) {
+        const res = await electronAPI.print.toA4Pdf({ 
+          html: a4Html, 
+          defaultFileName: `AppleVision_Quote_${sale.invoiceNumber}.pdf` 
+        });
+        if (res?.success && !res?.data?.canceled) {
+          showNotification('success', `Quote PDF saved: ${res.data?.filePath || defaultFileName}`);
+          return;
+        }
+      }
+
+      // Web Mode: Open isolated print/PDF preview and download standalone file
+      printHtmlViaIframe(a4Html);
+      downloadHtmlFile(defaultFileName, a4Html);
+      showNotification('success', 'A4 Quotation opened for printing & saved to Downloads!');
+    } catch (err: any) {
+      showNotification('error', `Quote failed: ${err.message}`);
+    } finally {
+      setIsExportingQuote(false);
+    }
+  };
+
+  const handleWhatsApp = () => {
+    let text = `*${settings.fullName || 'AppleVision Store Galle'}*\n`;
+    text += `Kalegana Junction, Galle\n`;
+    text += `Hotline: ${settings.phone || '+94 77 923 0519'}\n`;
+    text += `--------------------------------\n`;
+    text += `*OFFICIAL INVOICE: #${sale.invoiceNumber}*\n`;
+    text += `Date: ${sale.date} ${sale.time || ''}\n`;
+    text += `Customer: ${sale.customerName || 'Valued Customer'}\n`;
+    text += `--------------------------------\n`;
+    sale.items.forEach((item, idx) => {
+      text += `${idx + 1}. *${item.productName}*\n`;
+      if (item.imei) text += `   • IMEI: ${item.imei}\n`;
+      if (item.warranty && item.warranty !== 'None') text += `   • Warranty: ${item.warranty}\n`;
+      text += `   • Qty: ${item.quantity} x LKR ${item.unitPrice.toLocaleString()} = LKR ${item.lineTotal.toLocaleString()}\n`;
+    });
+    if (tradeInCredit > 0) {
+      text += `--------------------------------\n`;
+      text += `*Trade-In Credit:* -LKR ${tradeInCredit.toLocaleString()}\n`;
+    }
+    text += `--------------------------------\n`;
+    text += `*Subtotal:* LKR ${sale.subtotal.toLocaleString()}\n`;
+    if (sale.discountTotal > 0) text += `*Discount:* -LKR ${sale.discountTotal.toLocaleString()}\n`;
+    text += `*TOTAL PAID:* LKR ${sale.totalAmount.toLocaleString()}\n`;
+    text += `*Payment Method:* ${sale.paymentMethod || 'Cash'}\n`;
+    text += `--------------------------------\n`;
+    text += `*★ 3-Month Phone-to-Phone Replacement Warranty Included*\n`;
+    text += `(දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි)\n\n`;
+    text += `Official PDF Tax Invoice generated and stored.\n`;
+    text += `Thank you for choosing AppleVision Store Galle!`;
+
+    const encoded = encodeURIComponent(text);
+    const targetPhone = cleanSriLankanPhone(sale.customerPhone);
+
+    const waUrl = targetPhone 
+      ? `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encoded}`
+      : `https://api.whatsapp.com/send?text=${encoded}`;
+
+    window.open(waUrl, '_blank');
+    showNotification('success', targetPhone ? `Dispatching WhatsApp invoice to ${targetPhone}...` : 'Opening WhatsApp to choose recipient...');
+  };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none">
-      <div className="w-full max-w-xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 select-none">
+      <div className="w-full max-w-4xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
         {/* Header Ribbon */}
-        <div className="px-6 py-4 bg-emerald-600 dark:bg-emerald-700 text-white flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-6 h-6 text-white" />
+        <div className="px-6 py-4 bg-emerald-600 dark:bg-emerald-700 text-white flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+              <CheckCircle2 className="w-5 h-5 text-white" />
+            </div>
             <div>
               <h2 className="text-base font-black tracking-tight">Sale Completed Successfully!</h2>
-              <p className="text-[11px] text-emerald-100 font-mono">Invoice #{sale.invoiceNumber}</p>
+              <p className="text-[11px] text-emerald-100 font-mono">Invoice #{sale.invoiceNumber} • Official PDF Ready</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-emerald-200 hover:text-white transition-colors"
+            className="p-2 rounded-xl text-emerald-100 hover:text-white hover:bg-white/10 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* 80mm Thermal Receipt Preview Container */}
-        <div className="p-6 overflow-y-auto bg-slate-100 dark:bg-slate-900/60 flex justify-center">
+        {/* High-Resolution A4 Document Preview */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-100 dark:bg-slate-950 flex justify-center">
           <div
-            id="thermal-receipt-printable"
-            ref={receiptRef}
-            className="w-[80mm] max-w-[340px] bg-white text-black p-5 rounded-xl shadow-lg border border-slate-200 font-mono text-xs select-text space-y-3"
-            style={{ shapeRendering: 'crispEdges' }}
+            id="a4-invoice-printable"
+            ref={invoiceDocRef}
+            className="w-full max-w-[800px] bg-white text-slate-900 p-6 sm:p-10 rounded-2xl shadow-xl border border-slate-200 font-sans text-xs select-text space-y-6"
           >
-            {/* Store Logo */}
-            <div className="flex justify-center pb-1">
-              <img
-                src={APPLEVISION_LOGO_BASE64}
-                alt="AppleVision Store Galle"
-                className="h-12 w-auto object-contain"
-              />
-            </div>
-
-            {/* Store Details Header */}
-            <div className="text-center space-y-1 border-b border-dashed border-slate-400 pb-3">
-              <div className="font-extrabold text-sm tracking-tighter uppercase">
-                {settings.fullName}
-              </div>
-              <div className="text-[10px] text-slate-700 font-sans leading-tight">
-                {settings.tagline}
-              </div>
-              <div className="text-[10px] text-slate-600 font-sans">
-                {settings.address}, {settings.city}
-              </div>
-              <div className="text-[10px] text-slate-700 font-mono">
-                Hotline: {settings.phone}
-              </div>
-            </div>
-
-            {/* Invoice Meta */}
-            <div className="text-[11px] space-y-0.5 border-b border-dashed border-slate-400 pb-2">
-              <div className="flex justify-between">
-                <span>INVOICE:</span>
-                <span className="font-bold">{sale.invoiceNumber}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>DATE/TIME:</span>
-                <span>{sale.date} {sale.time}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>CASHIER:</span>
-                <span>{sale.cashierName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>CUSTOMER:</span>
-                <span className="font-semibold">{sale.customerName}</span>
-              </div>
-              {sale.customerPhone && (
-                <div className="flex justify-between">
-                  <span>PHONE:</span>
-                  <span>{sale.customerPhone}</span>
+            {/* Top Brand & Doc Header */}
+            <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-5 border-b-2 border-slate-100">
+              <div className="flex items-center gap-4">
+                <img
+                  src={APPLEVISION_LOGO_BASE64}
+                  alt="AppleVision Logo"
+                  className="w-16 h-16 rounded-xl object-cover border border-slate-900 bg-black shadow-md flex-shrink-0"
+                />
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 tracking-tight leading-tight">
+                    {settings.fullName || 'AppleVision Store Galle'}
+                  </h1>
+                  <p className="text-[10px] font-bold text-red-600 uppercase tracking-wider mt-0.5">
+                    {settings.tagline || 'Reliable Best Service · Genuine Apple Retail'}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    {settings.address || 'Kalegana Junction'}, {settings.city || 'Galle'} 80000, Sri Lanka<br />
+                    Hotline: <strong className="text-slate-700">{settings.phone || '+94 77 923 0519'}</strong> &nbsp;|&nbsp; 
+                    Email: <strong className="text-slate-700">{settings.email || 'nethminasurinda@gmail.com'}</strong>
+                  </p>
                 </div>
-              )}
-            </div>
-
-            {/* Purchased Items Table */}
-            <div className="space-y-2 border-b border-dashed border-slate-400 pb-2">
-              <div className="flex justify-between font-bold text-[10px] border-b border-slate-300 pb-1">
-                <span>ITEM / SPEC</span>
-                <span>TOTAL</span>
               </div>
 
-              {sale.items.map((item, idx) => (
-                <div key={idx} className="space-y-0.5 text-[11px]">
-                  <div className="font-bold text-slate-900 leading-tight">
-                    {item.productName}
+              <div className="sm:text-right">
+                <div className="text-2xl font-black tracking-widest text-slate-900 leading-none">
+                  INVOICE
+                </div>
+                <div className="text-xs font-mono font-bold text-slate-500 mt-1">
+                  #{sale.invoiceNumber}
+                </div>
+                <div className="inline-block mt-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-extrabold tracking-wide uppercase">
+                  PAID IN FULL ✓
+                </div>
+              </div>
+            </div>
+
+            {/* Bill-To & Invoice Info Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <span className="text-[10px] font-extrabold text-red-600 uppercase tracking-wider block mb-1">
+                  INVOICE TO:
+                </span>
+                <div className="text-sm font-extrabold text-slate-900">
+                  {sale.customerName || 'Valued Walk-in Customer'}
+                </div>
+                {sale.customerPhone && (
+                  <div className="text-[11px] text-slate-600 mt-0.5">
+                    Mobile: <strong className="text-slate-800">{sale.customerPhone}</strong>
                   </div>
-                  {item.imei && (
-                    <div className="text-[9px] text-slate-700">
-                      IMEI: <span className="font-bold">{item.imei}</span>
+                )}
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  Location: {(sale as any).customerAddress || 'Galle, Southern Province, Sri Lanka'}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1.5 pt-1.5 border-t border-slate-200">
+                  Payment Method: <strong className="text-slate-800">{sale.paymentMethod || 'Cash'}</strong>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex">
+                <div className="w-1.5 bg-red-600 rounded-full mr-3.5 flex-shrink-0" />
+                <div className="grid grid-cols-2 gap-3 flex-1 text-[11px]">
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Invoice Number</span>
+                    <span className="font-bold text-slate-900 font-mono">{sale.invoiceNumber}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Date & Time</span>
+                    <span className="font-bold text-slate-900">{sale.date} {sale.time || ''}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Cashier</span>
+                    <span className="font-bold text-slate-900">{sale.cashierName || 'Staff'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Status</span>
+                    <span className="font-bold text-emerald-600">COMPLETED</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Items Table */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-wider">
+                    <th className="py-2.5 px-3 text-center w-10">No</th>
+                    <th className="py-2.5 px-3">Item Description</th>
+                    <th className="py-2.5 px-3 text-right w-28">Price</th>
+                    <th className="py-2.5 px-3 text-center w-14">Qty</th>
+                    <th className="py-2.5 px-3 text-right w-32">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 text-[11px]">
+                  {sale.items.map((item, idx) => (
+                    <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}>
+                      <td className="py-2.5 px-3 text-center text-slate-400 font-bold">{idx + 1}</td>
+                      <td className="py-2.5 px-3">
+                        <div className="font-bold text-slate-900">{item.productName}</div>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[9.5px]">
+                          {item.imei && (
+                            <span className="font-mono font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-300">
+                              IMEI: {item.imei}
+                            </span>
+                          )}
+                          <span className="font-bold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">
+                            ✓ {item.warranty && item.warranty !== 'None' ? item.warranty : '3 Months AppleVision Warranty'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-semibold text-slate-700">
+                        Rs. {Number(item.unitPrice || 0).toLocaleString()}
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-bold text-slate-900">
+                        {item.quantity}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-extrabold text-slate-900">
+                        Rs. {Number(item.lineTotal || (item.quantity * item.unitPrice)).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Trade-In Received Box (if applicable) */}
+            {tradeInCredit > 0 && (
+              <div className="bg-emerald-50 border border-dashed border-emerald-500 rounded-xl p-3.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="bg-emerald-600 text-white text-[9px] font-extrabold px-2 py-0.5 rounded uppercase">
+                    ★ TRADE-IN TAKEN
+                  </span>
+                  <span className="text-xs font-bold text-emerald-900">
+                    {tradeIn?.brand || 'Apple'} {tradeIn?.model || 'Device'} {tradeIn?.storage ? `(${tradeIn.storage})` : ''}
+                    {tradeIn?.imei1 ? ` • IMEI: ${tradeIn.imei1}` : ''}
+                    {tradeIn?.batteryHealth ? ` • Battery: ${tradeIn.batteryHealth}%` : ''}
+                  </span>
+                </div>
+                <div className="text-xs font-black text-emerald-700 font-mono">
+                  Credit Deducted: -Rs. {Number(tradeInCredit).toLocaleString()}
+                </div>
+              </div>
+            )}
+
+            {/* Bottom Row: Payment & Warranty Policy on Left, Totals on Right */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+              <div className="space-y-3">
+                {/* Bank Info */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-[11px] leading-relaxed">
+                  <span className="text-[9.5px] font-extrabold text-red-600 uppercase tracking-wider block mb-1">
+                    Bank Details & Payment Info
+                  </span>
+                  <div>Method: <strong className="text-slate-800">{sale.paymentMethod || 'Cash'}</strong> • Status: <strong>Paid in Full</strong></div>
+                  <div>Bank: <strong>Commercial Bank of Ceylon PLC</strong> • Branch: <strong>Galle City</strong></div>
+                  <div>Account: <strong>AppleVision Store Galle</strong> • No: <strong className="font-mono">8009230519</strong></div>
+                </div>
+
+                {/* 3-Month Phone-to-Phone Warranty Box */}
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-[10.5px]">
+                  <div className="font-extrabold text-red-600 uppercase tracking-tight">
+                    ★ 3-Month Phone-to-Phone Replacement Warranty ★
+                  </div>
+                  <div className="font-bold text-slate-800 mt-0.5">
+                    දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි
+                  </div>
+                  <div className="text-[9.5px] text-slate-600 mt-1 leading-snug">
+                    1. 3-Month Phone-to-Phone Replacement Warranty for device hardware/logic board defects.<br />
+                    2. Warranty valid only with original invoice and matching device IMEI.<br />
+                    3. Physical damage, water ingress, and unauthorized repair strictly void warranty.
+                  </div>
+                </div>
+
+                {/* Barcode Verification */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-center">
+                  <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Scan to Verify Official Invoice
+                  </div>
+                  <div className="flex justify-center">
+                    <BarcodeSvg
+                      value={sale.invoiceNumber}
+                      height={38}
+                      showText={true}
+                      fontSize={10}
+                      className="max-w-full flex justify-center"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Totals Box */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+                <div className="p-3 space-y-2 text-[11px]">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Sub Total:</span>
+                    <span className="font-bold text-slate-900">Rs. {Number(sale.subtotal || 0).toLocaleString()}</span>
+                  </div>
+
+                  {Number(sale.discountTotal || 0) > 0 && (
+                    <div className="flex justify-between text-red-600 font-bold">
+                      <span>Discount:</span>
+                      <span>-Rs. {Number(sale.discountTotal || 0).toLocaleString()}</span>
                     </div>
                   )}
-                  {item.warranty && item.warranty !== 'None' && (
-                    <div className="text-[9px] text-slate-700">
-                      Warranty: {item.warranty}
+
+                  {tradeInCredit > 0 && (
+                    <div className="flex justify-between text-emerald-600 font-bold">
+                      <span>Trade-In Credit:</span>
+                      <span>-Rs. {Number(tradeInCredit).toLocaleString()}</span>
                     </div>
                   )}
-                  <div className="flex justify-between text-[10px] text-slate-600">
-                    <span>{item.quantity} x LKR {item.unitPrice.toLocaleString()} {item.discount > 0 ? `(-${item.discount})` : ''}</span>
-                    <span className="font-bold text-slate-900">LKR {item.lineTotal.toLocaleString()}</span>
+
+                  <div className="flex justify-between text-slate-500 text-[10px]">
+                    <span>Tax / VAT (0%):</span>
+                    <span>Included</span>
                   </div>
                 </div>
-              ))}
-            </div>
 
-            {/* Trade-In Device Received Box */}
-            {(tradeIn || tradeInCredit > 0) && (
-              <div className="border border-dashed border-slate-800 bg-slate-50 p-2.5 rounded-lg space-y-1 my-2">
-                <div className="flex items-center justify-between text-[11px] font-bold text-slate-900">
-                  <span className="flex items-center gap-1 text-emerald-800 font-extrabold">★ TRADE-IN DEVICE RECEIVED</span>
-                  <span className="font-mono text-emerald-700 font-extrabold">-LKR {tradeInCredit.toLocaleString()}</span>
+                <div className="bg-red-600 text-white px-4 py-3 flex justify-between items-center text-sm font-black">
+                  <span>TOTAL PAID:</span>
+                  <span className="text-base">Rs. {Number(sale.totalAmount || 0).toLocaleString()}</span>
                 </div>
-                {tradeIn && (
-                  <div className="text-[10px] text-slate-700 leading-snug space-y-0.5 pt-0.5">
+
+                {sale.paymentDetails?.cashTendered !== undefined && (
+                  <div className="p-3 bg-slate-50 border-t border-slate-200 text-[10.5px] space-y-1">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Cash Tendered:</span>
+                      <span>Rs. {Number(sale.paymentDetails.cashTendered).toLocaleString()}</span>
+                    </div>
                     <div className="flex justify-between font-bold text-slate-900">
-                      <span>{tradeIn.inspection?.model || tradeIn.model} {tradeIn.inspection?.storage || tradeIn.storage}</span>
-                      <span className="px-1.5 py-0.2 bg-slate-200 text-slate-800 rounded text-[9px] font-bold">
-                        {tradeIn.inspection?.physicalGrade || tradeIn.physical_grade || 'Grade A'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between font-mono text-[9px] text-slate-600">
-                      <span>IMEI: {tradeIn.inspection?.imei1 || tradeIn.imei1 || 'N/A'}</span>
-                      <span>Batt: {tradeIn.inspection?.batteryHealth ?? tradeIn.battery_health ?? 100}%</span>
-                    </div>
-                    <div className="flex justify-between text-[9px] text-slate-500 pt-0.5">
-                      <span>Ref #: {tradeIn.tradeInNumber || tradeIn.trade_in_number || 'TRD-REC'}</span>
-                      <span className="font-semibold text-slate-800">Approved Value: LKR {tradeInCredit.toLocaleString()}</span>
+                      <span>Change Given:</span>
+                      <span>Rs. {Number(sale.paymentDetails.changeDue || 0).toLocaleString()}</span>
                     </div>
                   </div>
                 )}
               </div>
-            )}
+            </div>
 
-            {/* Totals Breakdown */}
-            <div className="space-y-1 border-b border-dashed border-slate-400 pb-2 text-[11px]">
-              <div className="flex justify-between">
-                <span>{tradeIn ? 'New Device Price:' : 'Subtotal:'}</span>
-                <span>LKR {sale.subtotal.toLocaleString()}</span>
+            {/* Manager Signature & Footer Strip */}
+            <div className="flex flex-col sm:flex-row justify-between items-end gap-4 pt-4 border-t border-slate-200 text-slate-600">
+              <div>
+                <div className="w-40 border-b border-dashed border-slate-400 h-8 mb-1" />
+                <div className="font-bold text-slate-900 text-xs">{(settings as any).managerName || 'Surinda Nethmina'}</div>
+                <div className="text-[10px] text-slate-500">Store Manager / Authorized Officer</div>
               </div>
-              {tradeInCredit > 0 && (
-                <div className="flex justify-between font-bold text-emerald-700">
-                  <span>Trade-In Credit:</span>
-                  <span>-LKR {tradeInCredit.toLocaleString()}</span>
+              <div className="sm:text-right">
+                <div className="text-sm font-extrabold italic text-red-600">
+                  Thank you for your business!
                 </div>
-              )}
-              {sale.discountTotal > 0 && (
-                <div className="flex justify-between text-slate-600">
-                  <span>Discount:</span>
-                  <span>-LKR {sale.discountTotal.toLocaleString()}</span>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  AppleVision Store Galle • Kalegana Junction, Galle
                 </div>
-              )}
-              {sale.taxTotal > 0 && (
-                <div className="flex justify-between text-slate-600">
-                  <span>Tax ({settings.taxRatePercent}%):</span>
-                  <span>LKR {sale.taxTotal.toLocaleString()}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-bold text-sm pt-1 border-t border-slate-300">
-                <span>{tradeInCredit > 0 ? 'NET BALANCE PAID:' : 'TOTAL PAID:'}</span>
-                <span>LKR {sale.totalAmount.toLocaleString()}</span>
               </div>
             </div>
 
-            {/* Payment Details */}
-            <div className="text-[10px] space-y-0.5 border-b border-dashed border-slate-400 pb-2">
-              <div className="flex justify-between font-semibold">
-                <span>PAYMENT METHOD:</span>
-                <span>{sale.paymentMethod}</span>
-              </div>
-              {sale.paymentDetails?.cashTendered !== undefined && (
-                <>
-                  <div className="flex justify-between">
-                    <span>CASH TENDERED:</span>
-                    <span>LKR {sale.paymentDetails.cashTendered.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between font-bold">
-                    <span>CHANGE DUE:</span>
-                    <span>LKR {(sale.paymentDetails.changeDue || 0).toLocaleString()}</span>
-                  </div>
-                </>
-              )}
-              {sale.paymentDetails?.cardRef && (
-                <div className="flex justify-between">
-                  <span>CARD AUTH:</span>
-                  <span>{sale.paymentDetails.cardRef}</span>
-                </div>
-              )}
-              {sale.paymentDetails?.bankName && (
-                <div className="flex justify-between">
-                  <span>BANK DEPOSIT:</span>
-                  <span>{sale.paymentDetails.bankName}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Code 128 Barcode & Prominent Warranty Notice */}
-            <div className="text-center space-y-2 pt-1 text-[9px] text-slate-600 font-sans leading-tight">
-              {/* Professional SVG Barcode */}
-              <div className="py-2 flex flex-col items-center justify-center">
-                <BarcodeSvg
-                  value={sale.invoiceNumber}
-                  height={42}
-                  showText={true}
-                  fontSize={10}
-                  className="max-w-full flex justify-center"
-                />
-              </div>
-
-              {/* 3-Month Phone-to-Phone Replacement Warranty Badge */}
-              <div className="border border-slate-900 p-2 rounded-lg text-center my-1 bg-slate-50">
-                <div className="font-extrabold text-[10px] uppercase text-slate-900 tracking-tight">
-                  ★ 3-MONTH PHONE-TO-PHONE WARRANTY ★
-                </div>
-                <div className="text-[8.5px] font-bold text-slate-800 mt-0.5">
-                  දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි
-                </div>
-              </div>
-
-              <div className="text-[8.5px] text-slate-600 leading-snug pt-1">
-                <div>{settings.receiptHeader}</div>
-                <div className="font-semibold">{settings.receiptFooter}</div>
-              </div>
-
-              <div className="text-[9px] text-slate-400 font-mono pt-1">
-                *** REVOLUTIONIZING APPLE RETAIL IN GALLE ***
-              </div>
+            <div className="text-[9px] text-slate-400 text-center uppercase tracking-wider pt-2 border-t border-slate-100">
+              *** REVOLUTIONIZING APPLE RETAIL IN GALLE · OFFICIAL APPLEVISION TAX INVOICE · SYSTEM GENERATED ***
             </div>
           </div>
         </div>
 
-        {/* Footer Actions */}
-        <div className="px-6 py-4 bg-light-surface/70 dark:bg-dark-surface/70 border-t border-light-border dark:border-dark-border flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+        {/* Action Buttons Panel */}
+        <div className="px-6 py-4 bg-light-surface/80 dark:bg-dark-surface/80 border-t border-light-border dark:border-dark-border flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* 1. Print PDF */}
             <button
-              onClick={handlePrint}
-              className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold flex items-center gap-1.5 shadow-sm hover:opacity-90 transition-opacity"
+              onClick={handlePrintPdf}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold flex items-center gap-2 shadow-sm hover:opacity-90 transition-opacity"
             >
               <Printer className="w-4 h-4" />
-              <span>Print 80mm (Ctrl+P)</span>
+              <span>Print PDF (Ctrl+P)</span>
             </button>
 
+            {/* 2. Download / Save PDF */}
             <button
               onClick={handleDownloadPdf}
               disabled={isExportingPdf}
-              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-colors"
             >
               <Download className="w-4 h-4" />
-              <span>{isExportingPdf ? 'Saving PDF...' : 'Download / Save PDF'}</span>
+              <span>{isExportingPdf ? 'Saving PDF...' : 'Save / Download PDF'}</span>
             </button>
 
-            <button
-              onClick={handleDownloadA4Invoice}
-              disabled={isExportingA4}
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
-            >
-              <FileText className="w-4 h-4" />
-              <span>{isExportingA4 ? 'Generating...' : 'A4 Invoice'}</span>
-            </button>
-
-            <button
-              onClick={handleDownloadQuote}
-              disabled={isExportingA4}
-              className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
-            >
-              <ClipboardList className="w-4 h-4" />
-              <span>{isExportingA4 ? 'Generating...' : 'A4 Quote'}</span>
-            </button>
-
+            {/* 3. Send WhatsApp */}
             <button
               onClick={handleWhatsApp}
-              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-colors"
             >
               <Share2 className="w-4 h-4" />
               <span>Send WhatsApp</span>
             </button>
+
+            {/* 4. Quotation PDF */}
+            <button
+              onClick={handleDownloadQuote}
+              disabled={isExportingQuote}
+              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-colors"
+            >
+              <ClipboardList className="w-4 h-4" />
+              <span>{isExportingQuote ? 'Generating...' : 'Quotation PDF'}</span>
+            </button>
           </div>
 
+          {/* 5. Start Next Sale */}
           <button
             onClick={() => {
               onClose();
