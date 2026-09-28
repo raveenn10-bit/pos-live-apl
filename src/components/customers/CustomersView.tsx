@@ -1,7 +1,8 @@
-﻿'use client';
+'use client';
 
 import React, { useState } from 'react';
 import { useStore } from '../../context/StoreContext';
+import { useAuth } from '../../context/AuthContext';
 import { Customer } from '../../types';
 import { 
   Users, 
@@ -16,11 +17,25 @@ import {
   DollarSign, 
   Edit3, 
   X,
-  Receipt
+  Receipt,
+  Download,
+  Printer,
+  FileText,
+  Mail,
+  ShieldCheck
 } from 'lucide-react';
+import { 
+  downloadCsv, 
+  downloadHtmlFile, 
+  printHtmlViaIframe, 
+  generateSettlementReceiptHtml, 
+  generatePrintableReportHtml,
+  SettlementReceiptOptions 
+} from '../../utils/exportUtils';
 
 export const CustomersView: React.FC = () => {
-  const { customers, addCustomer, updateCustomer, settleCustomerCredit, sales } = useStore();
+  const { customers, addCustomer, updateCustomer, settleCustomerCredit, sales, settings, showNotification } = useStore();
+  const { currentUser } = useAuth();
 
   const [search, setSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -32,6 +47,9 @@ export const CustomersView: React.FC = () => {
   const [settleAmount, setSettleAmount] = useState<number>(0);
   const [settleMethod, setSettleMethod] = useState('Cash');
   const [settleNotes, setSettleNotes] = useState('');
+
+  // Settlement receipt state
+  const [settlementReceipt, setSettlementReceipt] = useState<SettlementReceiptOptions | null>(null);
 
   // Add/Edit Form
   const [formName, setFormName] = useState('');
@@ -94,6 +112,7 @@ export const CustomersView: React.FC = () => {
         notes: formNotes.trim() || undefined,
       });
       setIsAddModalOpen(false);
+      showNotification('success', `Customer profile updated for ${formName}`);
     } else {
       const created = addCustomer({
         name: formName.trim(),
@@ -107,6 +126,7 @@ export const CustomersView: React.FC = () => {
       });
       setSelectedCustomer(created);
       setIsAddModalOpen(false);
+      showNotification('success', `Registered new customer ${formName}`);
     }
   };
 
@@ -122,8 +142,36 @@ export const CustomersView: React.FC = () => {
     e.preventDefault();
     if (!activeCustomer || settleAmount <= 0) return;
 
-    settleCustomerCredit(activeCustomer.id, settleAmount, settleMethod, settleNotes);
+    const previousBal = activeCustomer.creditBalance;
+    const payment = Number(settleAmount);
+    const newBal = Math.max(0, previousBal - payment);
+    const receiptNum = `REC-SETTLE-${Date.now().toString().slice(-6)}`;
+    const dateStr = new Date().toISOString().substring(0, 10);
+    const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    settleCustomerCredit(activeCustomer.id, payment, settleMethod, settleNotes);
     setIsSettleModalOpen(false);
+
+    // Prepare official settlement receipt
+    const receiptOpts: SettlementReceiptOptions = {
+      receiptNumber: receiptNum,
+      date: dateStr,
+      time: timeStr,
+      customerName: activeCustomer.name,
+      customerPhone: activeCustomer.phone,
+      customerNic: activeCustomer.nic,
+      settleAmount: payment,
+      previousBalance: previousBal,
+      remainingBalance: newBal,
+      paymentMethod: settleMethod,
+      notes: settleNotes.trim() || undefined,
+      cashierName: currentUser?.name || 'Counter Cashier',
+      storeName: settings.fullName,
+      storePhone: settings.phone,
+      storeAddress: settings.address,
+    };
+
+    setSettlementReceipt(receiptOpts);
   };
 
   // Customer sales history
@@ -131,10 +179,104 @@ export const CustomersView: React.FC = () => {
     ? sales.filter(s => s.customerId === activeCustomer.id || s.customerPhone === activeCustomer.phone)
     : [];
 
+  // Export Customers CSV
+  const handleExportCustomersCsv = () => {
+    try {
+      const headers = [
+        'Customer Name', 'Phone', 'NIC', 'Email', 'City', 'Address',
+        'Lifetime Spend (LKR)', 'Invoices Count', 'Credit Balance (LKR)',
+        'Credit Limit (LKR)', 'Available Credit (LKR)', 'Notes'
+      ];
+
+      const rows = filteredCustomers.map(c => [
+        c.name,
+        c.phone,
+        c.nic || '',
+        c.email || '',
+        c.city || '',
+        c.address || '',
+        c.totalSpent,
+        c.ordersCount,
+        c.creditBalance,
+        c.creditLimit,
+        Math.max(0, c.creditLimit - c.creditBalance),
+        c.notes || ''
+      ]);
+
+      const dateStr = new Date().toISOString().substring(0, 10);
+      downloadCsv(`AppleVision_Customers_Directory_${dateStr}.csv`, headers, rows);
+      showNotification('success', `Exported ${filteredCustomers.length} customer records to CSV`);
+    } catch (err: any) {
+      console.error('Export customers error:', err);
+      showNotification('error', `CSV Export failed: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  // Print Customer Statement
+  const handlePrintCustomerStatement = () => {
+    if (!activeCustomer) return;
+
+    showNotification('info', `Generating statement for ${activeCustomer.name}...`);
+    const storeName = settings.fullName || 'AppleVision Store Galle';
+    const storePhone = settings.phone || '+94 77 923 0519';
+    const storeAddress = settings.address || 'Kalegana Junction, Galle';
+
+    const html = generatePrintableReportHtml({
+      title: 'Customer Account & Credit Ledger Statement',
+      subtitle: `VIP Client Dossier: ${activeCustomer.name} (${activeCustomer.phone})`,
+      dateRangeLabel: 'All Lifetime Invoices',
+      storeName,
+      storePhone,
+      storeAddress,
+      summaryCards: [
+        { label: 'Lifetime Purchases', value: `LKR ${activeCustomer.totalSpent.toLocaleString()}`, color: '#0f172a' },
+        { label: 'Total Invoices', value: `${customerSales.length}`, note: 'Completed purchases' },
+        { label: 'Credit Limit', value: `LKR ${activeCustomer.creditLimit.toLocaleString()}`, color: '#3b82f6' },
+        { label: 'Current Due Balance', value: `LKR ${activeCustomer.creditBalance.toLocaleString()}`, color: activeCustomer.creditBalance > 0 ? '#e11d48' : '#10b981' }
+      ],
+      headers: ['Invoice #', 'Date & Time', 'Items Count', 'Payment Method', 'Invoice Total', 'Customer Status'],
+      alignments: ['left', 'left', 'center', 'center', 'right', 'right'],
+      rows: customerSales.map(s => [
+        s.invoiceNumber,
+        `${s.date} ${s.time}`,
+        s.items.length,
+        s.paymentMethod,
+        `LKR ${s.totalAmount.toLocaleString()}`,
+        'Settled'
+      ]),
+      totalRow: [
+        'TOTAL SPENT',
+        '-',
+        customerSales.reduce((acc, s) => acc + s.items.length, 0),
+        '-',
+        `LKR ${activeCustomer.totalSpent.toLocaleString()}`,
+        `Outstanding: LKR ${activeCustomer.creditBalance.toLocaleString()}`
+      ],
+      notes: `Official customer ledger issued by ${storeName}. Credit limit: LKR ${activeCustomer.creditLimit.toLocaleString()}. Available credit: LKR ${(activeCustomer.creditLimit - activeCustomer.creditBalance).toLocaleString()}.`
+    });
+
+    printHtmlViaIframe(html);
+  };
+
+  // Print Settlement Receipt from Modal
+  const handlePrintSettlementReceipt = () => {
+    if (!settlementReceipt) return;
+    const html = generateSettlementReceiptHtml(settlementReceipt);
+    printHtmlViaIframe(html);
+  };
+
+  // Download Settlement Receipt HTML
+  const handleDownloadSettlementHtml = () => {
+    if (!settlementReceipt) return;
+    const html = generateSettlementReceiptHtml(settlementReceipt);
+    downloadHtmlFile(`AppleVision_Settlement_${settlementReceipt.receiptNumber}.html`, html);
+    showNotification('success', 'Settlement voucher saved to Downloads');
+  };
+
   return (
     <div className="space-y-6 select-none">
       {/* Header Banner */}
-      <div className="p-6 rounded-3xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-6 rounded-3xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <span className="p-1 rounded-lg bg-brand-500/10 text-brand-500">
@@ -149,13 +291,25 @@ export const CustomersView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAddModal}
-          className="px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold shadow-md shadow-brand-500/25 flex items-center gap-2 transition-all"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>+ Register Customer</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Export Customers CSV */}
+          <button
+            onClick={handleExportCustomersCsv}
+            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm flex items-center gap-2 transition-all active:scale-95"
+            title="Export all customers to Excel CSV"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export Customers CSV</span>
+          </button>
+
+          <button
+            onClick={handleOpenAddModal}
+            className="px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold shadow-md shadow-brand-500/25 flex items-center gap-2 transition-all active:scale-95"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>+ Register Customer</span>
+          </button>
+        </div>
       </div>
 
       {/* Main 2-Column Split */}
@@ -176,44 +330,50 @@ export const CustomersView: React.FC = () => {
 
           {/* Customer List */}
           <div className="flex-1 overflow-y-auto space-y-2 max-h-[600px] pr-1">
-            {filteredCustomers.map((c) => {
-              const isSelected = activeCustomer?.id === c.id;
-              return (
-                <div
-                  key={c.id}
-                  onClick={() => setSelectedCustomer(c)}
-                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
-                    isSelected
-                      ? 'bg-light-elevated dark:bg-dark-elevated border-brand-500/50 shadow-sm'
-                      : 'bg-light-surface/50 dark:bg-dark-surface/50 hover:bg-light-surface dark:hover:bg-dark-surface border-light-border dark:border-dark-border'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                      <span>{c.name}</span>
-                      {c.creditBalance > 0 && (
-                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-500 border border-rose-500/20">
-                          Due: LKR {c.creditBalance.toLocaleString()}
-                        </span>
-                      )}
+            {filteredCustomers.length === 0 ? (
+              <div className="p-8 text-center text-xs text-light-muted">
+                No customers match your search query.
+              </div>
+            ) : (
+              filteredCustomers.map((c) => {
+                const isSelected = activeCustomer?.id === c.id;
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => setSelectedCustomer(c)}
+                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+                      isSelected
+                        ? 'bg-light-elevated dark:bg-dark-elevated border-brand-500/50 shadow-sm'
+                        : 'bg-light-surface/50 dark:bg-dark-surface/50 hover:bg-light-surface dark:hover:bg-dark-surface border-light-border dark:border-dark-border'
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                        <span>{c.name}</span>
+                        {c.creditBalance > 0 && (
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                            Due: LKR {c.creditBalance.toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] text-light-muted dark:text-dark-muted font-mono">
+                        <span>{c.phone}</span>
+                        {c.city && <span>• {c.city}</span>}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 text-[11px] text-light-muted dark:text-dark-muted font-mono">
-                      <span>{c.phone}</span>
-                      {c.city && <span>• {c.city}</span>}
-                    </div>
-                  </div>
 
-                  <div className="text-right">
-                    <div className="font-mono font-bold text-xs text-slate-800 dark:text-slate-200">
-                      LKR {c.totalSpent.toLocaleString()}
-                    </div>
-                    <div className="text-[10px] text-light-muted">
-                      {c.ordersCount} invoice(s)
+                    <div className="text-right">
+                      <div className="font-mono font-bold text-xs text-slate-800 dark:text-slate-200">
+                        LKR {c.totalSpent.toLocaleString()}
+                      </div>
+                      <div className="text-[10px] text-light-muted">
+                        {c.ordersCount} invoice(s)
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -243,17 +403,33 @@ export const CustomersView: React.FC = () => {
                             {activeCustomer.city}
                           </span>
                         )}
+                        {activeCustomer.nic && (
+                          <span className="flex items-center gap-1">
+                            <ShieldCheck className="w-3.5 h-3.5 text-brand-500" />
+                            NIC: {activeCustomer.nic}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Print Statement */}
+                    <button
+                      onClick={handlePrintCustomerStatement}
+                      className="px-3 py-1.5 rounded-xl bg-light-surface dark:bg-dark-surface hover:bg-light-elevated dark:hover:bg-dark-elevated border border-light-border dark:border-dark-border text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-colors"
+                      title="Print A4 Customer Account Statement"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Statement</span>
+                    </button>
+
                     <button
                       onClick={() => handleOpenEditModal(activeCustomer)}
                       className="px-3 py-1.5 rounded-xl bg-light-surface dark:bg-dark-surface hover:bg-light-elevated dark:hover:bg-dark-elevated border border-light-border dark:border-dark-border text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-colors"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
-                      <span>Edit Profile</span>
+                      <span>Edit</span>
                     </button>
 
                     {activeCustomer.creditBalance > 0 && (
@@ -490,6 +666,7 @@ export const CustomersView: React.FC = () => {
                 </label>
                 <input
                   type="number"
+                  min={1}
                   max={activeCustomer.creditBalance}
                   value={settleAmount}
                   onChange={(e) => setSettleAmount(Number(e.target.value))}
@@ -542,6 +719,90 @@ export const CustomersView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Credit Settlement Receipt Modal */}
+      {settlementReceipt && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-dark-card border border-light-border dark:border-dark-border rounded-3xl shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-light-border dark:border-dark-border pb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1 rounded-lg bg-emerald-500/10 text-emerald-500">
+                  <CheckCircle2 className="w-5 h-5" />
+                </span>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Settlement Receipt Issued
+                </h3>
+              </div>
+              <button 
+                onClick={() => setSettlementReceipt(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Receipt Summary Card */}
+            <div className="p-4 rounded-2xl bg-light-surface/60 dark:bg-dark-surface/60 border border-light-border dark:border-dark-border space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-light-muted">Receipt Number:</span>
+                <span className="font-mono font-bold text-brand-500">{settlementReceipt.receiptNumber}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-light-muted">Customer:</span>
+                <span className="font-semibold text-slate-900 dark:text-white">{settlementReceipt.customerName}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-light-muted">Amount Settled:</span>
+                <span className="font-mono font-bold text-emerald-500 text-sm">
+                  LKR {settlementReceipt.settleAmount.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-light-muted">Payment Method:</span>
+                <span className="font-semibold">{settlementReceipt.paymentMethod}</span>
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t border-light-border dark:border-dark-border">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">Remaining Balance:</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white">
+                  LKR {settlementReceipt.remainingBalance.toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            {/* Print & Download Actions */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSettlementReceipt(null)}
+                className="px-4 py-2.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-center"
+              >
+                Done
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadSettlementHtml}
+                  className="px-3.5 py-2.5 rounded-xl bg-light-surface dark:bg-dark-surface hover:bg-light-elevated dark:hover:bg-dark-elevated border border-light-border dark:border-dark-border text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-all"
+                  title="Download HTML voucher"
+                >
+                  <FileText className="w-3.5 h-3.5 text-brand-500" />
+                  <span>Download</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrintSettlementReceipt}
+                  className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold shadow-sm flex items-center gap-2 transition-all hover:opacity-90 active:scale-95"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Print Receipt</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

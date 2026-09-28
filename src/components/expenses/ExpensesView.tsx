@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState } from 'react';
 import { useStore } from '../../context/StoreContext';
@@ -16,11 +16,21 @@ import {
   AlertTriangle,
   Lock,
   Unlock,
-  Coins
+  Coins,
+  Printer,
+  Download,
+  FileText
 } from 'lucide-react';
+import { 
+  downloadCsv, 
+  downloadHtmlFile, 
+  printHtmlViaIframe, 
+  generatePettyCashVoucherHtml, 
+  generatePrintableReportHtml 
+} from '../../utils/exportUtils';
 
 export const ExpensesView: React.FC = () => {
-  const { expenses, addExpense, cashDrawer, closeCashDrawer, reopenCashDrawer, showNotification } = useStore();
+  const { expenses, addExpense, cashDrawer, closeCashDrawer, reopenCashDrawer, settings, showNotification } = useStore();
   const { currentUser } = useAuth();
 
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
@@ -59,17 +69,40 @@ export const ExpensesView: React.FC = () => {
     e.preventDefault();
     if (expenseAmount <= 0 || !expenseDesc.trim()) return;
 
+    const voucherNum = expenseReceiptRef.trim() || `VOUCH-${Date.now().toString().slice(-6)}`;
+    const recordedByName = currentUser?.name || 'Surinda Nethmina';
+
     addExpense({
       date: new Date().toISOString().substring(0, 10),
       category: expenseCategory,
       amount: Number(expenseAmount),
       paymentMethod: expenseMethod,
       description: expenseDesc.trim(),
-      recordedBy: currentUser?.name || 'Surinda Nethmina',
-      receiptRef: expenseReceiptRef.trim() || undefined,
+      recordedBy: recordedByName,
+      receiptRef: voucherNum,
     });
 
     setIsAddExpenseOpen(false);
+
+    // Offer quick print of the voucher
+    const shouldPrint = confirm(`Expense of LKR ${Number(expenseAmount).toLocaleString()} recorded. Would you like to print a Petty Cash Voucher?`);
+    if (shouldPrint) {
+      const html = generatePettyCashVoucherHtml({
+        voucherNumber: voucherNum,
+        date: new Date().toISOString().substring(0, 10),
+        category: expenseCategory,
+        description: expenseDesc.trim(),
+        amount: Number(expenseAmount),
+        paymentMethod: expenseMethod,
+        recordedBy: recordedByName,
+        receiptRef: voucherNum,
+        storeName: settings.fullName,
+        storePhone: settings.phone,
+        storeAddress: settings.address,
+      });
+      printHtmlViaIframe(html);
+    }
+
     setExpenseDesc('');
     setExpenseReceiptRef('');
   };
@@ -88,10 +121,99 @@ export const ExpensesView: React.FC = () => {
 
   const discrepancy = actualDrawerCount - cashDrawer.expectedCash;
 
+  // Print Individual Expense Voucher
+  const handlePrintVoucher = (exp: Expense) => {
+    showNotification('info', `Preparing voucher for ${exp.description}...`);
+    const html = generatePettyCashVoucherHtml({
+      voucherNumber: exp.receiptRef || `VOUCH-${exp.id.slice(-6).toUpperCase()}`,
+      date: exp.date,
+      category: exp.category,
+      description: exp.description,
+      amount: exp.amount,
+      paymentMethod: exp.paymentMethod,
+      recordedBy: exp.recordedBy,
+      receiptRef: exp.receiptRef,
+      storeName: settings.fullName,
+      storePhone: settings.phone,
+      storeAddress: settings.address,
+    });
+    printHtmlViaIframe(html);
+  };
+
+  // Export Expenses CSV
+  const handleExportExpensesCsv = () => {
+    try {
+      const headers = [
+        'Date', 'Expense ID', 'Category', 'Description', 'Payment Method', 
+        'Voucher / Receipt Ref', 'Recorded By', 'Amount (LKR)'
+      ];
+      const rows = expenses.map(e => [
+        e.date,
+        e.id,
+        e.category,
+        e.description,
+        e.paymentMethod,
+        e.receiptRef || 'N/A',
+        e.recordedBy,
+        e.amount
+      ]);
+      const dateStr = new Date().toISOString().substring(0, 10);
+      downloadCsv(`AppleVision_Store_Expenses_${dateStr}.csv`, headers, rows);
+      showNotification('success', `Exported ${expenses.length} expense records to CSV`);
+    } catch (err: any) {
+      console.error('Export expenses error:', err);
+      showNotification('error', `Failed to export expenses: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  // Print Cash Drawer Session & Expenses Audit Report
+  const handlePrintDrawerAudit = () => {
+    showNotification('info', 'Preparing Daily Register & Expenses Audit printout...');
+    const storeName = settings.fullName || 'AppleVision Store Galle';
+    const storePhone = settings.phone || '+94 77 923 0519';
+    const storeAddress = settings.address || 'Kalegana Junction, Galle';
+
+    const html = generatePrintableReportHtml({
+      title: 'Daily Cash Drawer Reconciliation & Expenses Report',
+      subtitle: `Register Session (${cashDrawer.date}) • Status: ${cashDrawer.status.toUpperCase()}`,
+      dateRangeLabel: cashDrawer.date,
+      storeName,
+      storePhone,
+      storeAddress,
+      summaryCards: [
+        { label: 'Opening Cash Float', value: `LKR ${cashDrawer.openingCash.toLocaleString()}`, color: '#64748b' },
+        { label: 'Cash Sales Collected', value: `+LKR ${cashDrawer.cashSales.toLocaleString()}`, color: '#10b981' },
+        { label: 'Cash Expenses Paid', value: `-LKR ${cashDrawer.cashExpenses.toLocaleString()}`, color: '#f59e0b' },
+        { label: 'Calculated Drawer Cash', value: `LKR ${cashDrawer.expectedCash.toLocaleString()}`, color: '#0f172a' }
+      ],
+      headers: ['Expense Date', 'Category', 'Description & Voucher Ref', 'Method', 'Recorded By', 'Amount (LKR)'],
+      alignments: ['left', 'left', 'left', 'center', 'left', 'right'],
+      rows: expenses.map(e => [
+        e.date,
+        e.category,
+        `${e.description}${e.receiptRef ? ` (Ref: ${e.receiptRef})` : ''}`,
+        e.paymentMethod,
+        e.recordedBy,
+        `LKR ${e.amount.toLocaleString()}`
+      ]),
+      totalRow: [
+        'TOTAL EXPENSES LOGGED',
+        '-',
+        '-',
+        '-',
+        '-',
+        `LKR ${totalExpenses.toLocaleString()}`
+      ],
+      notes: `Cash Register status: ${cashDrawer.status}. Opening Float: LKR ${cashDrawer.openingCash.toLocaleString()} | Sales Inflow: LKR ${cashDrawer.cashSales.toLocaleString()} | Outflows: LKR ${cashDrawer.cashExpenses.toLocaleString()}. Certified by store shift supervisor.`
+    });
+
+    printHtmlViaIframe(html);
+  };
+
   return (
     <div className="space-y-6 select-none">
       {/* Top Banner */}
-      <div className="p-6 rounded-3xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-6 rounded-3xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <span className="p-1 rounded-lg bg-brand-500/10 text-brand-500">
@@ -106,14 +228,34 @@ export const ExpensesView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Print Drawer & Expense Report */}
+          <button
+            onClick={handlePrintDrawerAudit}
+            className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 text-xs font-bold shadow-sm flex items-center gap-2 transition-all active:scale-95"
+            title="Print printable Daily Cash Drawer and Expenses Audit Report"
+          >
+            <Printer className="w-4 h-4" />
+            <span>Print Register Audit</span>
+          </button>
+
+          {/* Export CSV */}
+          <button
+            onClick={handleExportExpensesCsv}
+            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm flex items-center gap-2 transition-all active:scale-95"
+            title="Export all expense records to CSV"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export CSV</span>
+          </button>
+
           {cashDrawer.status === 'Open' ? (
             <button
               onClick={() => {
                 setActualDrawerCount(cashDrawer.expectedCash);
                 setIsCloseDrawerOpen(true);
               }}
-              className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold shadow-sm flex items-center gap-2 transition-all"
+              className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm flex items-center gap-2 transition-all"
             >
               <Lock className="w-4 h-4" />
               <span>Close Day Register</span>
@@ -193,10 +335,10 @@ export const ExpensesView: React.FC = () => {
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
             <Receipt className="w-4 h-4 text-brand-500" />
-            Store Expenses Ledger
+            Store Expenses Ledger ({expenses.length} records)
           </h3>
           <div className="text-xs font-mono font-bold text-brand-500">
-            Total Logged: LKR {totalExpenses.toLocaleString()}
+            Total Outflow: LKR {totalExpenses.toLocaleString()}
           </div>
         </div>
 
@@ -210,28 +352,47 @@ export const ExpensesView: React.FC = () => {
                 <th className="pb-3">Method</th>
                 <th className="pb-3">Recorded By</th>
                 <th className="pb-3 text-right">Amount (LKR)</th>
+                <th className="pb-3 text-right">Voucher</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-light-border dark:divide-dark-border">
-              {expenses.map((exp) => (
-                <tr key={exp.id} className="hover:bg-light-surface/40 dark:hover:bg-dark-surface/40">
-                  <td className="py-3 font-mono text-light-muted">{exp.date}</td>
-                  <td className="py-3">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border">
-                      {exp.category}
-                    </span>
-                  </td>
-                  <td className="py-3 font-semibold text-slate-800 dark:text-slate-200">
-                    {exp.description}
-                    {exp.receiptRef && <div className="text-[10px] text-light-muted font-mono">Ref: {exp.receiptRef}</div>}
-                  </td>
-                  <td className="py-3 text-slate-600 dark:text-slate-400">{exp.paymentMethod}</td>
-                  <td className="py-3 text-slate-600 dark:text-slate-400">{exp.recordedBy}</td>
-                  <td className="py-3 text-right font-mono font-bold text-slate-900 dark:text-white">
-                    LKR {exp.amount.toLocaleString()}
+              {expenses.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-light-muted">
+                    No operating expenses recorded yet.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                expenses.map((exp) => (
+                  <tr key={exp.id} className="hover:bg-light-surface/40 dark:hover:bg-dark-surface/40">
+                    <td className="py-3 font-mono text-light-muted">{exp.date}</td>
+                    <td className="py-3">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-light-surface dark:bg-dark-surface border border-light-border dark:border-dark-border">
+                        {exp.category}
+                      </span>
+                    </td>
+                    <td className="py-3 font-semibold text-slate-800 dark:text-slate-200">
+                      {exp.description}
+                      {exp.receiptRef && <div className="text-[10px] text-light-muted font-mono">Ref: {exp.receiptRef}</div>}
+                    </td>
+                    <td className="py-3 text-slate-600 dark:text-slate-400">{exp.paymentMethod}</td>
+                    <td className="py-3 text-slate-600 dark:text-slate-400">{exp.recordedBy}</td>
+                    <td className="py-3 text-right font-mono font-bold text-slate-900 dark:text-white">
+                      LKR {exp.amount.toLocaleString()}
+                    </td>
+                    <td className="py-3 text-right">
+                      <button
+                        onClick={() => handlePrintVoucher(exp)}
+                        className="px-2.5 py-1 rounded-lg bg-light-surface dark:bg-dark-surface hover:bg-light-elevated dark:hover:bg-dark-elevated border border-light-border dark:border-dark-border text-[11px] font-semibold text-slate-700 dark:text-slate-300 inline-flex items-center gap-1 transition-colors"
+                        title="Print 80mm petty cash disbursement voucher"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-brand-500" />
+                        <span>Print</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -266,6 +427,7 @@ export const ExpensesView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Expense Amount (LKR) *</label>
                 <input
                   type="number"
+                  min={1}
                   value={expenseAmount}
                   onChange={(e) => setExpenseAmount(Number(e.target.value))}
                   required

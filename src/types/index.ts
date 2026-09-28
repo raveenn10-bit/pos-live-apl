@@ -132,13 +132,17 @@ export type PaymentMethod =
   | 'Cash' 
   | 'Card' 
   | 'Bank Transfer' 
+  | 'Bank Deposit'
   | 'Customer Credit' 
+  | 'Trade-In Credit'
   | 'Credit' 
   | 'Installment' 
   | 'Split'
   | 'CASH' 
   | 'CARD' 
   | 'BANK_TRANSFER' 
+  | 'BANK_DEPOSIT'
+  | 'TRADE_IN_CREDIT'
   | 'CREDIT' 
   | 'INSTALLMENT' 
   | 'SPLIT';
@@ -203,6 +207,8 @@ export interface PaymentDetails {
   splitCash?: number;
   splitCard?: number;
   splitCredit?: number;
+  tradeInCreditAmount?: number;
+  tradeInId?: string;
   installmentProvider?: string;
   installmentMonths?: number;
   notes?: string;
@@ -495,6 +501,8 @@ export type AccessoriesIncluded =
   | 'Box and Cable'
   | 'Device Only';
 
+export type ICloudStatus = 'Unlocked / Removed' | 'iCloud Locked';
+
 export interface TradeInInspection {
   customerName: string;
   customerPhone: string;
@@ -515,6 +523,8 @@ export interface TradeInInspection {
   partsReplaced: PartsReplacedStatus;
   waterDamage: WaterDamageStatus;
   accessories: AccessoriesIncluded;
+  iCloudStatus?: ICloudStatus;
+  icloudStatus?: ICloudStatus;
   staffNotes?: string;
   photoUrls?: string[];
 }

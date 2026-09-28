@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState } from 'react';
 import { useStore } from '../../context/StoreContext';
@@ -17,11 +17,14 @@ import {
   ArrowRight,
   ClipboardList,
   Layers,
-  Printer
+  Printer,
+  MessageSquare
 } from 'lucide-react';
+import { generateCode128Svg } from '../../utils/barcodeGenerator';
+import { APPLEVISION_LOGO_BASE64 } from '../../assets/logoBase64';
 
 export const RepairsView: React.FC = () => {
-  const { repairs, addRepairTicket, updateRepairStatus, updateRepairTicket, showNotification } = useStore();
+  const { repairs, addRepairTicket, updateRepairStatus, updateRepairTicket, showNotification, settings } = useStore();
 
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'kanban' | 'table'>('kanban');
@@ -40,6 +43,273 @@ export const RepairsView: React.FC = () => {
   const [advancePaid, setAdvancePaid] = useState<number>(5000);
   const [technicianNotes, setTechnicianNotes] = useState('');
   const [assignedTechnician, setAssignedTechnician] = useState('Nuwan Pradeep');
+
+  // Sri Lankan phone normalizer (e.g. 077... or +94 77... -> 9477...)
+  const normalizeSriLankanPhone = (rawPhone?: string): string => {
+    if (!rawPhone) return '';
+    const digits = rawPhone.replace(/[^0-9]/g, '');
+    if (digits.startsWith('94') && digits.length >= 11) return digits;
+    if (digits.startsWith('0') && digits.length === 10) return '94' + digits.substring(1);
+    if (digits.length === 9) return '94' + digits;
+    return digits;
+  };
+
+  // Clean browser iframe printer
+  const printHtmlViaIframe = (htmlContent: string) => {
+    try {
+      const existing = document.getElementById('repair-isolated-print-iframe');
+      if (existing) existing.remove();
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'repair-isolated-print-iframe';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0';
+      iframe.style.pointerEvents = 'none';
+      document.body.appendChild(iframe);
+
+      const frameDoc = iframe.contentWindow?.document;
+      if (!frameDoc) {
+        window.print();
+        return;
+      }
+
+      frameDoc.open();
+      frameDoc.write(htmlContent);
+      frameDoc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (err) {
+          console.warn('Iframe print failed, falling back to window.print', err);
+          window.print();
+        }
+      }, 400);
+    } catch (err) {
+      console.error('printHtmlViaIframe error:', err);
+      window.print();
+    }
+  };
+
+  // Send WhatsApp repair status update
+  const sendWhatsAppStatusUpdate = (ticket: RepairTicket) => {
+    const cleanPhone = normalizeSriLankanPhone(ticket.customerPhone);
+    if (!cleanPhone) {
+      showNotification('error', 'Valid customer phone number is required for WhatsApp notification');
+      return;
+    }
+
+    const balance = Math.max(0, ticket.estimatedCost - ticket.advancePaid);
+    let statusMessage = '';
+
+    switch (ticket.status) {
+      case 'Received':
+        statusMessage = `Hello *${ticket.customerName}*,\n\nYour repair ticket *#${ticket.ticketNumber}* for *${ticket.deviceModel}* has been received at *AppleVision Store Galle*.\n\n📋 *Reported Issue:* ${ticket.faultDescription}\n💵 *Estimated Cost:* LKR ${ticket.estimatedCost.toLocaleString()}\n💳 *Advance Paid:* LKR ${ticket.advancePaid.toLocaleString()}\n💰 *Balance Due on Pickup:* LKR ${balance.toLocaleString()}\n\nOur hardware technicians will begin diagnostics shortly. Thank you for choosing AppleVision Galle!`;
+        break;
+      case 'Diagnostics':
+        statusMessage = `Hello *${ticket.customerName}*,\n\nUpdate on your repair ticket *#${ticket.ticketNumber}* (*${ticket.deviceModel}*):\n🔬 Your device is currently undergoing bench diagnostics by technician *${ticket.assignedTechnician || 'Nuwan Pradeep'}*.\n\nWe will update you as soon as the test results are ready.`;
+        break;
+      case 'Waiting for Parts':
+        statusMessage = `Hello *${ticket.customerName}*,\n\nUpdate on your repair ticket *#${ticket.ticketNumber}* (*${ticket.deviceModel}*):\n📦 Original Apple replacement components have been reserved / ordered for your device. Repair will proceed immediately upon bench delivery.`;
+        break;
+      case 'Repairing':
+        statusMessage = `Hello *${ticket.customerName}*,\n\nUpdate on your repair ticket *#${ticket.ticketNumber}* (*${ticket.deviceModel}*):\n⚙️ Our certified technician is currently carrying out precision component repair & calibration on your *${ticket.deviceModel}*.`;
+        break;
+      case 'Ready for Pickup':
+        statusMessage = `🎉 *REPAIR COMPLETE & READY FOR PICKUP!*\n\nHello *${ticket.customerName}*,\nYour *${ticket.deviceModel}* (Ticket *#${ticket.ticketNumber}*) has successfully passed all quality checks and is ready for collection at *AppleVision Store Galle*.\n\n💰 *Balance Payable:* LKR ${balance.toLocaleString()}\n📍 *Store:* 42 Wakwella Road, Galle\n🕒 *Opening Hours:* 9:00 AM - 8:00 PM\n\nPlease present this ticket or your national ID when collecting. Thank you!`;
+        break;
+      case 'Delivered':
+        statusMessage = `Hello *${ticket.customerName}*,\n\nYour *${ticket.deviceModel}* (Ticket *#${ticket.ticketNumber}*) has been delivered.\n\nThank you for choosing *AppleVision Store Galle* for your Apple hardware repairs. All bench services carry our official warranty. Let us know if you need any assistance!`;
+        break;
+      default:
+        statusMessage = `Hello *${ticket.customerName}*,\n\nUpdate on your repair ticket *#${ticket.ticketNumber}* (*${ticket.deviceModel}*) at AppleVision Store Galle. Status: *${ticket.status}*.`;
+    }
+
+    const url = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(statusMessage)}`;
+    window.open(url, '_blank');
+    showNotification('success', `WhatsApp alert opened for ${ticket.customerName} (${cleanPhone})`);
+  };
+
+  // Build clean 80mm job sheet HTML
+  const buildRepairJobSheetHtml = (ticket: RepairTicket, storeSettings: any): string => {
+    const barcodeSvg = generateCode128Svg(ticket.ticketNumber, {
+      height: 38,
+      showText: true,
+      fontSize: 10,
+      lineColor: '#000000',
+      backgroundColor: 'transparent'
+    });
+
+    const balance = Math.max(0, ticket.estimatedCost - ticket.advancePaid);
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Repair Job Sheet - ${ticket.ticketNumber}</title>
+  <style>
+    @page {
+      size: 80mm auto;
+      margin: 3mm;
+    }
+    @media print {
+      body { width: 74mm; margin: 0 auto; }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      color: #111827;
+      line-height: 1.35;
+      background: #ffffff;
+      padding: 4px;
+    }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .font-bold { font-weight: 700; }
+    .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .border-b { border-bottom: 1px dashed #9ca3af; }
+    .border-t { border-top: 1px dashed #9ca3af; }
+    .my-2 { margin-top: 6px; margin-bottom: 6px; }
+    .logo { max-width: 130px; height: auto; margin: 0 auto 4px auto; display: block; }
+    .barcode-container { text-align: center; margin: 6px 0; }
+    .section-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin-top: 6px; margin-bottom: 2px; }
+    .row { display: flex; justify-content: space-between; margin-bottom: 2px; }
+    .badge { display: inline-block; padding: 2px 6px; border: 1px solid #111; font-size: 9.5px; font-weight: bold; border-radius: 4px; }
+    .terms { font-size: 8px; color: #4b5563; line-height: 1.25; margin-top: 8px; text-align: justify; }
+  </style>
+</head>
+<body>
+  <div class="text-center">
+    <img src="${APPLEVISION_LOGO_BASE64}" alt="AppleVision Logo" class="logo" />
+    <div style="font-size: 13px; font-weight: 900; letter-spacing: -0.2px;">APPLEVISION STORE GALLE</div>
+    <div style="font-size: 9.5px; color: #4b5563;">Official Apple Hardware Bench & Service Center</div>
+    <div style="font-size: 9px; color: #4b5563;">42 Wakwella Road, Galle, Sri Lanka</div>
+    <div style="font-size: 9px; color: #4b5563;">Tel: +94 91 224 8899 | Hotline: +94 77 923 0519</div>
+  </div>
+
+  <div class="border-b my-2"></div>
+
+  <div class="text-center">
+    <span class="badge">REPAIR JOB SHEET & CLAIM TICKET</span>
+    <div class="barcode-container">
+      ${barcodeSvg}
+    </div>
+  </div>
+
+  <div class="border-b my-2"></div>
+
+  <div class="row">
+    <span style="color:#6b7280;">Ticket Number:</span>
+    <span class="font-mono font-bold">${ticket.ticketNumber}</span>
+  </div>
+  <div class="row">
+    <span style="color:#6b7280;">Date Received:</span>
+    <span class="font-mono">${ticket.createdAt}</span>
+  </div>
+  <div class="row">
+    <span style="color:#6b7280;">Pipeline Stage:</span>
+    <span class="font-bold">${ticket.status}</span>
+  </div>
+  <div class="row">
+    <span style="color:#6b7280;">Bench Technician:</span>
+    <span>${ticket.assignedTechnician || 'Nuwan Pradeep'}</span>
+  </div>
+
+  <div class="border-b my-2"></div>
+
+  <div class="section-title">Customer Details</div>
+  <div class="row">
+    <span style="color:#6b7280;">Customer:</span>
+    <span class="font-bold">${ticket.customerName}</span>
+  </div>
+  <div class="row">
+    <span style="color:#6b7280;">Phone:</span>
+    <span class="font-mono font-bold">${ticket.customerPhone}</span>
+  </div>
+
+  <div class="border-b my-2"></div>
+
+  <div class="section-title">Device & Reported Diagnostics</div>
+  <div class="row">
+    <span style="color:#6b7280;">Device Model:</span>
+    <span class="font-bold">${ticket.deviceModel}</span>
+  </div>
+  <div class="row">
+    <span style="color:#6b7280;">IMEI / Serial:</span>
+    <span class="font-mono">${ticket.imeiOrSerial || 'N/A'}</span>
+  </div>
+  <div class="row">
+    <span style="color:#6b7280;">Passcode / PIN:</span>
+    <span class="font-mono font-bold">${ticket.passcode || 'Pattern / None'}</span>
+  </div>
+  <div style="margin-top: 3px;">
+    <span style="color:#6b7280;">Reported Fault:</span>
+    <div style="font-weight: 600; margin-top: 1px;">${ticket.faultDescription}</div>
+  </div>
+  <div style="margin-top: 3px;">
+    <span style="color:#6b7280;">Physical Condition:</span>
+    <div style="font-size: 10px; color: #374151;">${ticket.physicalCondition || 'Standard bench inspection'}</div>
+  </div>
+  ${ticket.technicianNotes ? `
+  <div style="margin-top: 3px;">
+    <span style="color:#6b7280;">Bench Notes:</span>
+    <div style="font-size: 10px; font-style: italic;">${ticket.technicianNotes}</div>
+  </div>` : ''}
+
+  <div class="border-b my-2"></div>
+
+  <div class="section-title">Financials</div>
+  <div class="row">
+    <span>Estimated Total:</span>
+    <span class="font-mono font-bold">LKR ${ticket.estimatedCost.toLocaleString()}</span>
+  </div>
+  <div class="row" style="color: #047857;">
+    <span>Advance Deposit Paid:</span>
+    <span class="font-mono font-bold">-LKR ${ticket.advancePaid.toLocaleString()}</span>
+  </div>
+  <div class="border-t my-2"></div>
+  <div class="row" style="font-size: 12px;">
+    <span class="font-bold">BALANCE PAYABLE:</span>
+    <span class="font-mono font-bold">LKR ${balance.toLocaleString()}</span>
+  </div>
+
+  <div class="border-b my-2"></div>
+
+  <div class="terms">
+    <strong>Terms of Service:</strong><br />
+    1. 30-Day component warranty applies to replaced parts and labor.<br />
+    2. Customer is responsible for iCloud backup; AppleVision is not liable for data loss during repair.<br />
+    3. Uncollected devices after 60 days are subject to disposal under store policy.<br />
+    4. Presentation of this ticket or WhatsApp authorization is mandatory for collection.
+  </div>
+
+  <div class="row" style="margin-top: 20px; gap: 8px;">
+    <div style="flex: 1; border-top: 1px solid #000; text-align: center; font-size: 8.5px; padding-top: 2px;">
+      Customer Signature
+    </div>
+    <div style="flex: 1; border-top: 1px solid #000; text-align: center; font-size: 8.5px; padding-top: 2px;">
+      Technician Signature
+    </div>
+  </div>
+
+  <div class="text-center" style="margin-top: 10px; font-size: 8px; color: #6b7280;">
+    AppleVision Store Galle • www.applevisiongalle.lk
+  </div>
+</body>
+</html>`;
+  };
+
+  const handlePrintJobSheet = (ticket: RepairTicket) => {
+    const html = buildRepairJobSheetHtml(ticket, settings);
+    printHtmlViaIframe(html);
+    showNotification('info', `Printing ticket ${ticket.ticketNumber}...`);
+  };
 
   const statuses: RepairStatus[] = [
     'Received',
@@ -205,20 +475,44 @@ export const RepairsView: React.FC = () => {
                         <span className="font-mono font-bold text-emerald-500">LKR {ticket.estimatedCost.toLocaleString()}</span>
                       </div>
 
-                      {/* Advance status button */}
-                      {status !== 'Delivered' && (
+                      {/* Action buttons: WhatsApp, Print, Advance */}
+                      <div className="flex items-center gap-1 mt-1 pt-1 border-t border-light-border dark:border-dark-border">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleAdvanceStatus(ticket);
+                            sendWhatsAppStatusUpdate(ticket);
                           }}
-                          className="w-full mt-1 py-1 rounded bg-light-elevated dark:bg-dark-elevated hover:bg-brand-500 hover:text-white text-[10px] font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-center gap-1 transition-colors"
+                          className="p-1 rounded bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center justify-center transition-colors"
+                          title="Send WhatsApp Update"
                         >
-                          <span>Advance</span>
-                          <ArrowRight className="w-3 h-3" />
+                          <MessageSquare className="w-3.5 h-3.5" />
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePrintJobSheet(ticket);
+                          }}
+                          className="p-1 rounded bg-light-elevated dark:bg-dark-elevated hover:bg-brand-500 hover:text-white text-[10px] text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors"
+                          title="Print Job Sheet"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                        {status !== 'Delivered' && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAdvanceStatus(ticket);
+                            }}
+                            className="flex-1 py-1 rounded bg-light-elevated dark:bg-dark-elevated hover:bg-brand-500 hover:text-white text-[10px] font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-center gap-1 transition-colors"
+                          >
+                            <span>Advance</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
 
@@ -248,6 +542,7 @@ export const RepairsView: React.FC = () => {
                   <th className="pb-3">Technician</th>
                   <th className="pb-3 text-right">Est. Cost</th>
                   <th className="pb-3 text-right">Advance</th>
+                  <th className="pb-3 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-light-border dark:divide-dark-border">
@@ -277,6 +572,37 @@ export const RepairsView: React.FC = () => {
                     </td>
                     <td className="py-3 text-right font-mono text-emerald-500 font-semibold">
                       LKR {r.advancePaid.toLocaleString()}
+                    </td>
+                    <td className="py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => sendWhatsAppStatusUpdate(r)}
+                          className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-600 dark:text-emerald-400 transition-colors"
+                          title="WhatsApp Update"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintJobSheet(r)}
+                          className="p-1.5 rounded-lg bg-light-elevated dark:bg-dark-elevated hover:bg-brand-500 hover:text-white text-slate-600 dark:text-slate-300 transition-colors"
+                          title="Print Job Sheet"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                        {r.status !== 'Delivered' && (
+                          <button
+                            type="button"
+                            onClick={() => handleAdvanceStatus(r)}
+                            className="px-2 py-1 rounded-lg bg-light-elevated dark:bg-dark-elevated hover:bg-brand-500 hover:text-white text-[10px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 transition-colors"
+                            title="Advance Pipeline"
+                          >
+                            <span>Next</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -381,15 +707,24 @@ export const RepairsView: React.FC = () => {
               >
                 Close
               </button>
-              <button
-                onClick={() => {
-                  window.print();
-                }}
-                className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold flex items-center gap-1.5"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print Job Sheet</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => sendWhatsAppStatusUpdate(selectedTicket)}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>WhatsApp Update</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePrintJobSheet(selectedTicket)}
+                  className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold flex items-center gap-1.5 hover:bg-slate-800 transition-colors"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Print Job Sheet</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
@@ -14,13 +14,14 @@ import {
   CheckCircle2, 
   AlertCircle,
   Receipt,
-  DollarSign
+  DollarSign,
+  Repeat
 } from 'lucide-react';
 
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (sale?: any) => void;
 }
 
 export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onSuccess }) => {
@@ -61,6 +62,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onS
 
   useEffect(() => {
     if (isOpen) {
+      if (cartTotal === 0 && (cartTradeInCredit > 0 || currentTradeIn)) {
+        setPaymentMethod('Trade-In Credit');
+      } else {
+        setPaymentMethod('Cash');
+      }
       setCashTendered(cartTotal);
       setSplitCash(Math.round(cartTotal / 2));
       setSplitCard(cartTotal - Math.round(cartTotal / 2));
@@ -69,7 +75,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onS
       setBankRef('');
       setSaleNotes('');
     }
-  }, [isOpen, cartTotal]);
+  }, [isOpen, cartTotal, cartTradeInCredit, currentTradeIn]);
 
   if (!isOpen) return null;
 
@@ -111,6 +117,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onS
       return;
     }
 
+    if (paymentMethod === 'Trade-In Credit') {
+      if (cartTradeInCredit <= 0 && !currentTradeIn) {
+        showNotification('error', 'No Trade-In attached. Please inspect and add a trade-in device (F7) first.');
+        return;
+      }
+    }
+
     if (paymentMethod === 'Split' && !isSplitValid) {
       showNotification('error', `Split payment total does not match bill total (Remaining: LKR ${splitRemaining.toLocaleString()})`);
       return;
@@ -120,10 +133,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onS
       cashTendered: paymentMethod === 'Cash' ? cashTendered : undefined,
       changeDue: paymentMethod === 'Cash' ? changeDue : undefined,
       cardRef: paymentMethod === 'Card' ? cardRef || 'TERMINAL-OK' : undefined,
-      bankName: paymentMethod === 'Bank Transfer' ? bankName : undefined,
-      bankRef: paymentMethod === 'Bank Transfer' ? bankRef || 'TRANSFER-OK' : undefined,
+      bankName: (paymentMethod === 'Bank Deposit' || paymentMethod === 'Bank Transfer') ? bankName : undefined,
+      bankRef: (paymentMethod === 'Bank Deposit' || paymentMethod === 'Bank Transfer') ? (bankRef.trim() || 'SLIP-VERIFIED') : undefined,
       installmentProvider: paymentMethod === 'Installment' ? installmentProvider : undefined,
       installmentMonths: paymentMethod === 'Installment' ? installmentMonths : undefined,
+      tradeInCreditAmount: (paymentMethod === 'Trade-In Credit' || cartTradeInCredit > 0) ? cartTradeInCredit : undefined,
+      tradeInId: currentTradeIn?.id,
       splitCash: paymentMethod === 'Split' ? splitCash : undefined,
       splitCard: paymentMethod === 'Split' ? splitCard : undefined,
       splitCredit: paymentMethod === 'Split' ? splitCredit : undefined,
@@ -132,15 +147,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onS
 
     const completed = completeSale(paymentMethod, details);
     if (completed) {
-      onSuccess();
+      onSuccess(completed);
     }
   };
 
   const paymentMethodsList = [
     { id: 'Cash', label: 'Cash', icon: Banknote, desc: 'Drawer tender & change' },
     { id: 'Card', label: 'Card Terminal', icon: CreditCard, desc: 'Visa / Mastercard / Amex' },
-    { id: 'Bank Transfer', label: 'Bank Transfer', icon: Building2, desc: 'Direct online deposit' },
+    { id: 'Bank Deposit', label: 'Bank Deposit', icon: Building2, desc: 'Commercial Bank / BOC / HNB' },
     { id: 'Customer Credit', label: 'Customer Credit', icon: UserCheck, desc: 'Add to customer ledger' },
+    { id: 'Trade-In Credit', label: 'Trade-In Credit', icon: Repeat, desc: 'Device exchange settlement' },
     { id: 'Installment', label: 'Installment / BNPL', icon: CalendarClock, desc: 'Koko / Mintpay / Bank 0%' },
     { id: 'Split', label: 'Split Payment', icon: Split, desc: 'Cash + Card combination' },
   ];
@@ -305,36 +321,99 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onS
               </div>
             )}
 
-            {/* BANK TRANSFER MODE */}
-            {paymentMethod === 'Bank Transfer' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Destination Bank
-                  </label>
-                  <select
-                    value={bankName}
-                    onChange={(e) => setBankName(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500"
-                  >
-                    <option value="Commercial Bank">Commercial Bank of Ceylon</option>
-                    <option value="Sampath Bank">Sampath Bank PLC</option>
-                    <option value="Hatton National Bank">Hatton National Bank (HNB)</option>
-                    <option value="Bank of Ceylon">Bank of Ceylon (BOC)</option>
-                  </select>
+            {/* BANK DEPOSIT & TRANSFER MODE */}
+            {(paymentMethod === 'Bank Deposit' || paymentMethod === 'Bank Transfer') && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Destination Bank
+                    </label>
+                    <select
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500"
+                    >
+                      <option value="Commercial Bank">Commercial Bank of Ceylon</option>
+                      <option value="Sampath Bank">Sampath Bank PLC</option>
+                      <option value="Hatton National Bank">Hatton National Bank (HNB)</option>
+                      <option value="Bank of Ceylon">Bank of Ceylon (BOC)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Transaction / Slip Reference
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. REF-CEFT-849102 or Slip #"
+                      value={bankRef}
+                      onChange={(e) => setBankRef(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500 font-mono"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Transaction / Slip Reference
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. REF-CEFT-849102"
-                    value={bankRef}
-                    onChange={(e) => setBankRef(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-dark-card border border-light-border dark:border-dark-border focus:outline-none focus:border-brand-500 font-mono"
-                  />
+                <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/40 text-[11px] text-blue-900 dark:text-blue-200">
+                  <div className="font-bold">AppleVision Store Galle Bank Account:</div>
+                  <div className="font-mono text-[10.5px] mt-0.5">Commercial Bank of Ceylon · Galle City Branch · Acc: <strong>8009230519</strong></div>
                 </div>
+              </div>
+            )}
+
+            {/* TRADE-IN CREDIT MODE */}
+            {paymentMethod === 'Trade-In Credit' && (
+              <div className="space-y-3">
+                {currentTradeIn || cartTradeInCredit > 0 ? (
+                  <div className="p-3.5 rounded-xl bg-white dark:bg-dark-card border border-emerald-500/30 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                        <Repeat className="w-4 h-4 text-emerald-500" />
+                        <span>Trade-In Device Attached</span>
+                      </span>
+                      <span className="font-mono text-xs font-black text-emerald-600 dark:text-emerald-400">
+                        Credit: LKR {cartTradeInCredit.toLocaleString()}
+                      </span>
+                    </div>
+
+                    {currentTradeIn && (
+                      <div className="p-2.5 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 text-[11px] space-y-1">
+                        <div className="flex justify-between font-bold text-slate-900 dark:text-white">
+                          <span>{currentTradeIn.inspection.brand} {currentTradeIn.inspection.model} {currentTradeIn.inspection.storage}</span>
+                          <span className="px-1.5 py-0.2 bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-300 rounded font-semibold text-[10px]">
+                            {currentTradeIn.inspection.physicalGrade}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-slate-600 dark:text-slate-400 font-mono text-[10px]">
+                          <span>IMEI: {currentTradeIn.inspection.imei1}</span>
+                          <span>Batt: {currentTradeIn.inspection.batteryHealth}%</span>
+                        </div>
+                        <div className="flex justify-between text-slate-500 dark:text-slate-400 text-[10px] pt-0.5">
+                          <span>Customer: {currentTradeIn.customerName}</span>
+                          <span className="font-bold text-emerald-600 dark:text-emerald-400">Value: LKR {currentTradeIn.finalApprovedValue.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="text-xs pt-1 border-t border-slate-100 dark:border-slate-800">
+                      {cartTotal === 0 ? (
+                        <div className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                          <span>Net balance is LKR 0.00. Entire bill is fully settled with Trade-In Credit.</span>
+                        </div>
+                      ) : (
+                        <div className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+                          Trade-In Credit of <strong className="text-emerald-600">LKR {cartTradeInCredit.toLocaleString()}</strong> applied.
+                          Remaining balance of <strong className="text-brand-500">LKR {cartTotal.toLocaleString()}</strong> will be completed.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>No trade-in device is attached to this cart. Close and press F7 to inspect and apply a trade-in device first.</span>
+                  </div>
+                )}
               </div>
             )}
 

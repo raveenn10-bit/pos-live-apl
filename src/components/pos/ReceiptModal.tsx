@@ -56,72 +56,254 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
   const tradeIn = sale.tradeInRecord || (sale as any).tradeIn || (sale as any).trade_in;
   const tradeInCredit = sale.tradeInCredit || tradeIn?.finalApprovedValue || tradeIn?.final_approved_value || 0;
 
-  const handlePrint = () => {
-    window.print();
+  // Keyboard Shortcuts: Ctrl+P for 80mm print, F2 for next sale, Escape to close
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        handlePrint();
+      } else if (e.key === 'F2') {
+        e.preventDefault();
+        onClose();
+        onNewSale();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+
+  const cleanSriLankanPhone = (rawPhone?: string): string => {
+    if (!rawPhone) return '';
+    const digits = rawPhone.replace(/[^0-9]/g, '');
+    if (digits.startsWith('94') && digits.length >= 11) return digits;
+    if (digits.startsWith('0') && digits.length === 10) return '94' + digits.substring(1);
+    if (digits.length === 9) return '94' + digits;
+    return digits;
   };
 
-  const handleDownloadPdf = async () => {
-    if (!receiptRef.current) return;
-    setIsExportingPdf(true);
-
+  const printHtmlViaIframe = (htmlContent: string) => {
     try {
-      const receiptElement = receiptRef.current;
-      const receiptContent = receiptElement.outerHTML;
+      const existing = document.getElementById('print-isolated-iframe');
+      if (existing) existing.remove();
 
-      // Wrap in clean printable HTML template
-      const fullHtml = `
-<!DOCTYPE html>
+      const iframe = document.createElement('iframe');
+      iframe.id = 'print-isolated-iframe';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0';
+      iframe.style.pointerEvents = 'none';
+      document.body.appendChild(iframe);
+
+      const frameDoc = iframe.contentWindow?.document;
+      if (!frameDoc) {
+        window.print();
+        return;
+      }
+
+      frameDoc.open();
+      frameDoc.write(htmlContent);
+      frameDoc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (err) {
+          console.warn('Iframe print failed, falling back to window.print', err);
+          window.print();
+        }
+      }, 400);
+    } catch (err) {
+      console.error('printHtmlViaIframe error:', err);
+      window.print();
+    }
+  };
+
+  const downloadHtmlFile = (fileName: string, htmlContent: string) => {
+    try {
+      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      console.error('downloadHtmlFile error:', e);
+    }
+  };
+
+  const build80mmReceiptHtml = (s: typeof sale, storeSettings: typeof settings): string => {
+    const barcodeSvg = generateCode128Svg(s.invoiceNumber, {
+      height: 38,
+      showText: true,
+      fontSize: 10,
+      lineColor: '#000000',
+      backgroundColor: 'transparent'
+    });
+
+    const tradeInRec = s.tradeInRecord || (s as any).tradeIn || (s as any).trade_in;
+    const tradeCredit = s.tradeInCredit || tradeInRec?.finalApprovedValue || tradeInRec?.final_approved_value || 0;
+
+    const itemRows = s.items.map((item, idx) => {
+      const imei = item.imei ? `<div style="font-size:9.5px;color:#333;margin-top:2px;">IMEI: <strong>${item.imei}</strong></div>` : '';
+      const warranty = item.warranty && item.warranty !== 'None' ? `<div style="font-size:9.5px;color:#047857;font-weight:bold;">★ ${item.warranty}</div>` : '';
+      return `
+        <div style="margin-bottom:7px;border-bottom:1px dotted #ccc;padding-bottom:5px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div style="font-weight:bold;font-size:11.5px;max-width:190px;">${item.productName || 'Apple Device'}</div>
+            <div style="font-weight:bold;font-size:11.5px;text-align:right;">Rs. ${Number(item.lineTotal || 0).toLocaleString()}</div>
+          </div>
+          ${imei}
+          ${warranty}
+          <div style="font-size:10px;color:#555;margin-top:2px;">
+            ${item.quantity} x Rs. ${Number(item.unitPrice || 0).toLocaleString()}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AppleVision Receipt - ${sale.invoiceNumber}</title>
+  <title>Receipt - ${s.invoiceNumber}</title>
   <style>
     @page { margin: 0; size: 80mm auto; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Courier New', Courier, monospace, -apple-system, BlinkMacSystemFont, sans-serif;
       font-size: 11px;
-      line-height: 1.25;
-      color: #000;
-      background: #fff;
-      margin: 0;
-      padding: 6px;
-      width: 290px;
-      box-sizing: border-box;
+      line-height: 1.35;
+      color: #000000;
+      background: #ffffff;
+      width: 80mm;
+      max-width: 80mm;
+      padding: 4mm 3mm 8mm 3mm;
+      margin: 0 auto;
       -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
-    img { max-width: 90px; height: auto; display: block; margin: 0 auto; }
     .text-center { text-align: center; }
     .text-right { text-align: right; }
-    .font-bold, .bold { font-weight: bold; }
-    .font-mono { font-family: 'Courier New', Courier, monospace; }
+    .font-bold { font-weight: bold; }
+    .dashed-line { border-top: 1px dashed #000; margin: 8px 0; }
+    .flex-between { display: flex; justify-content: space-between; align-items: center; margin: 2px 0; }
+    .warranty-box { border: 1.5px solid #000; padding: 6px; border-radius: 6px; text-align: center; margin: 8px 0; background: #fbfbfb; }
   </style>
 </head>
 <body>
-  ${receiptContent}
+  <div class="text-center" style="margin-bottom:6px;">
+    <img src="${APPLEVISION_LOGO_BASE64}" alt="AppleVision Logo" style="max-height:48px;max-width:140px;margin:0 auto;display:block;" />
+  </div>
+  <div class="text-center" style="margin-bottom:6px;">
+    <div style="font-size:14px;font-weight:900;letter-spacing:-0.3px;text-transform:uppercase;">${storeSettings.fullName || 'AppleVision Store Galle'}</div>
+    <div style="font-size:10px;font-weight:bold;margin-top:1px;">${storeSettings.tagline || 'Reliable Best Service'}</div>
+    <div style="font-size:9.5px;color:#333;margin-top:2px;">
+      ${storeSettings.address || 'Kalegana Junction'}, ${storeSettings.city || 'Galle'}<br>
+      Hotline: ${storeSettings.phone || '+94 77 923 0519'}
+    </div>
+  </div>
+  <div class="dashed-line"></div>
+  <div style="font-size:10px;">
+    <div class="flex-between">
+      <span>INVOICE #:</span>
+      <span class="font-bold">${s.invoiceNumber}</span>
+    </div>
+    <div class="flex-between">
+      <span>DATE &amp; TIME:</span>
+      <span>${s.date} ${s.time || ''}</span>
+    </div>
+    <div class="flex-between">
+      <span>CASHIER:</span>
+      <span>${s.cashierName || 'Staff'}</span>
+    </div>
+    <div class="flex-between">
+      <span>CUSTOMER:</span>
+      <span class="font-bold">${s.customerName || 'Walk-in Customer'}</span>
+    </div>
+    ${s.customerPhone ? `<div class="flex-between"><span>PHONE:</span><span>${s.customerPhone}</span></div>` : ''}
+  </div>
+  <div class="dashed-line"></div>
+  <div>${itemRows}</div>
+  <div class="dashed-line"></div>
+  <div style="font-size:11px;">
+    <div class="flex-between">
+      <span>SUBTOTAL:</span>
+      <span>Rs. ${Number(s.subtotal || 0).toLocaleString()}</span>
+    </div>
+    ${Number(s.discountTotal || 0) > 0 ? `<div class="flex-between font-bold"><span>DISCOUNT:</span><span>-Rs. ${Number(s.discountTotal || 0).toLocaleString()}</span></div>` : ''}
+    ${tradeCredit > 0 ? `<div class="flex-between font-bold"><span>TRADE-IN CREDIT:</span><span>-Rs. ${Number(tradeCredit).toLocaleString()}</span></div>` : ''}
+    <div class="flex-between" style="font-size:14px;font-weight:900;border-top:1px solid #000;border-bottom:1px solid #000;padding:4px 0;margin:6px 0;">
+      <span>NET TOTAL:</span>
+      <span>Rs. ${Number(s.totalAmount || 0).toLocaleString()}</span>
+    </div>
+  </div>
+  <div style="font-size:10px;margin-top:4px;">
+    <div class="flex-between font-bold">
+      <span>PAID VIA:</span>
+      <span>${s.paymentMethod || 'Cash'}</span>
+    </div>
+    ${s.paymentDetails?.cashTendered !== undefined ? `
+    <div class="flex-between"><span>CASH TENDERED:</span><span>Rs. ${Number(s.paymentDetails.cashTendered).toLocaleString()}</span></div>
+    <div class="flex-between font-bold"><span>CHANGE DUE:</span><span>Rs. ${Number(s.paymentDetails.changeDue || 0).toLocaleString()}</span></div>` : ''}
+    ${s.paymentDetails?.cardRef ? `<div class="flex-between"><span>CARD AUTH:</span><span>${s.paymentDetails.cardRef}</span></div>` : ''}
+  </div>
+  <div class="dashed-line"></div>
+  <div class="text-center" style="margin:8px 0;">
+    ${barcodeSvg}
+  </div>
+  <div class="warranty-box">
+    <div style="font-size:10px;font-weight:900;text-transform:uppercase;">★ 3-MONTH PHONE-TO-PHONE WARRANTY ★</div>
+    <div style="font-size:9.5px;font-weight:bold;margin-top:2px;">දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි</div>
+  </div>
+  <div class="text-center" style="font-size:9px;color:#333;margin-top:6px;line-height:1.4;">
+    <div>${storeSettings.receiptHeader || 'Thank you for shopping at AppleVision Store Galle!'}</div>
+    <div style="font-weight:bold;margin-top:2px;">${storeSettings.receiptFooter || 'Warranty valid only with original invoice.'}</div>
+    <div style="font-size:8.5px;color:#777;margin-top:6px;">*** REVOLUTIONIZING APPLE RETAIL IN GALLE ***</div>
+  </div>
 </body>
-</html>
-      `.trim();
+</html>`;
+  };
+
+  const handlePrint = () => {
+    showNotification('info', 'Opening 80mm thermal receipt print...');
+    const receiptHtml = build80mmReceiptHtml(sale, settings);
+    printHtmlViaIframe(receiptHtml);
+  };
+
+  const handleDownloadPdf = async () => {
+    setIsExportingPdf(true);
+    try {
+      const receiptHtml = build80mmReceiptHtml(sale, settings);
+      const defaultFileName = `AppleVision_Receipt_${sale.invoiceNumber}.html`;
 
       const electronAPI = (window as any).electronAPI;
       if (electronAPI?.print?.toPdf) {
-        const defaultFileName = `AppleVision_Receipt_${sale.invoiceNumber}.pdf`;
         const res = await electronAPI.print.toPdf({
-          html: fullHtml,
-          defaultFileName,
+          html: receiptHtml,
+          defaultFileName: `AppleVision_Receipt_${sale.invoiceNumber}.pdf`,
         });
-
         if (res?.success && !res?.data?.canceled) {
           showNotification('success', `Receipt PDF saved: ${res.data?.filePath || defaultFileName}`);
-        } else if (res?.data?.canceled) {
-          // User dismissed save dialog
-        } else {
-          showNotification('error', res?.message || 'Failed to save PDF');
+          return;
         }
-      } else {
-        // Fallback to browser print/pdf dialog
-        window.print();
-        showNotification('info', 'Opened system dialog to save or print receipt PDF');
       }
+
+      // Web Mode: Open isolated print/PDF preview and download standalone file
+      printHtmlViaIframe(receiptHtml);
+      downloadHtmlFile(defaultFileName, receiptHtml);
+      showNotification('success', 'Receipt opened in print dialog and saved to Downloads!');
     } catch (err: any) {
       console.error('PDF export error:', err);
       showNotification('error', `PDF generation failed: ${err.message || 'Unknown error'}`);
@@ -131,19 +313,19 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
   };
 
   const handleWhatsApp = () => {
-    let text = `*${settings.fullName}*\n`;
+    let text = `*${settings.fullName || 'AppleVision Store Galle'}*\n`;
     text += `Kalegana Junction, Galle\n`;
-    text += `Hotline: ${settings.phone}\n`;
+    text += `Hotline: ${settings.phone || '+94 77 923 0519'}\n`;
     text += `--------------------------------\n`;
-    text += `*INVOICE: ${sale.invoiceNumber}*\n`;
-    text += `Date: ${sale.date} ${sale.time}\n`;
-    text += `Customer: ${sale.customerName}\n`;
+    text += `*INVOICE: #${sale.invoiceNumber}*\n`;
+    text += `Date: ${sale.date} ${sale.time || ''}\n`;
+    text += `Customer: ${sale.customerName || 'Valued Customer'}\n`;
     text += `--------------------------------\n`;
     sale.items.forEach((item, idx) => {
       text += `${idx + 1}. *${item.productName}*\n`;
-      if (item.imei) text += `   IMEI: ${item.imei}\n`;
-      if (item.warranty && item.warranty !== 'None') text += `   Warranty: ${item.warranty}\n`;
-      text += `   Qty: ${item.quantity} x LKR ${item.unitPrice.toLocaleString()} = LKR ${item.lineTotal.toLocaleString()}\n`;
+      if (item.imei) text += `   • IMEI: ${item.imei}\n`;
+      if (item.warranty && item.warranty !== 'None') text += `   • Warranty: ${item.warranty}\n`;
+      text += `   • Qty: ${item.quantity} x LKR ${item.unitPrice.toLocaleString()} = LKR ${item.lineTotal.toLocaleString()}\n`;
     });
     if (tradeInCredit > 0) {
       text += `--------------------------------\n`;
@@ -153,17 +335,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, onN
     text += `*Subtotal:* LKR ${sale.subtotal.toLocaleString()}\n`;
     if (sale.discountTotal > 0) text += `*Discount:* -LKR ${sale.discountTotal.toLocaleString()}\n`;
     text += `*TOTAL PAID:* LKR ${sale.totalAmount.toLocaleString()}\n`;
-    text += `*Method:* ${sale.paymentMethod}\n`;
+    text += `*Payment Method:* ${sale.paymentMethod || 'Cash'}\n`;
     text += `--------------------------------\n`;
-    text += `*3-Month Phone-to-Phone Replacement Warranty Included*\n`;
+    text += `*★ 3-Month Phone-to-Phone Replacement Warranty Included*\n`;
+    text += `(දුරකථනයට දුරකථනයක් මාරු කිරීමේ පූර්ණ වගකීමක් සහිතයි)\n`;
     text += `Thank you for choosing AppleVision Store Galle!`;
 
     const encoded = encodeURIComponent(text);
-    const targetPhone = sale.customerPhone 
-      ? sale.customerPhone.replace(/[^0-9]/g, '') 
-      : settings.whatsapp.replace(/[^0-9]/g, '');
+    const targetPhone = cleanSriLankanPhone(sale.customerPhone);
 
-    window.open(`https://wa.me/${targetPhone}?text=${encoded}`, '_blank');
+    const waUrl = targetPhone 
+      ? `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encoded}`
+      : `https://api.whatsapp.com/send?text=${encoded}`;
+
+    window.open(waUrl, '_blank');
+    showNotification('success', targetPhone ? `Dispatching WhatsApp invoice to ${targetPhone}...` : 'Opening WhatsApp to choose recipient...');
   };
 
 const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docType: 'INVOICE' | 'QUOTE'): string => {
@@ -756,30 +942,31 @@ const buildA4InvoiceHtml = (s: typeof sale, storeSettings: typeof settings, docT
 const handleDownloadA4Invoice = async () => {
   setIsExportingA4(true);
   try {
-    const electronAPI = (window as any).electronAPI;
     const a4Html = buildA4InvoiceHtml(sale, settings, 'INVOICE');
-    const defaultFileName = `AppleVision_Invoice_${sale.invoiceNumber}.pdf`;
+    const defaultFileName = `AppleVision_Invoice_${sale.invoiceNumber}.html`;
+    const electronAPI = (window as any).electronAPI;
     
-    let res;
     if (electronAPI?.print?.toA4Pdf) {
-      res = await electronAPI.print.toA4Pdf({ html: a4Html, defaultFileName });
+      const res = await electronAPI.print.toA4Pdf({ html: a4Html, defaultFileName: `AppleVision_Invoice_${sale.invoiceNumber}.pdf` });
+      if (res?.success && !res?.data?.canceled) {
+        showNotification('success', `A4 Invoice saved: ${res.data?.filePath || defaultFileName}`);
+        return;
+      }
     } else if (electronAPI?.print?.generateA4Invoice) {
       const r = await electronAPI.print.generateA4Invoice({ invoiceId: sale.id, docType: 'INVOICE' });
-      if (r?.success) {
-        res = await electronAPI.print.toA4Pdf({ html: r.html, defaultFileName });
+      if (r?.success && electronAPI?.print?.toA4Pdf) {
+        const res = await electronAPI.print.toA4Pdf({ html: r.html, defaultFileName: `AppleVision_Invoice_${sale.invoiceNumber}.pdf` });
+        if (res?.success && !res?.data?.canceled) {
+          showNotification('success', `A4 Invoice saved: ${res.data?.filePath || defaultFileName}`);
+          return;
+        }
       }
-    } else {
-      const w = window.open('', '_blank');
-      if (w) { w.document.write(a4Html); w.document.close(); w.print(); }
-      showNotification('info', 'Opened print dialog for A4 Invoice');
-      return;
     }
     
-    if (res?.success && !res?.data?.canceled) {
-      showNotification('success', `A4 Invoice saved: ${res.data?.filePath || defaultFileName}`);
-    } else if (!res?.data?.canceled) {
-      showNotification('error', res?.message || 'Failed to save A4 Invoice');
-    }
+    // Web Mode: Open isolated print/PDF preview and download standalone file
+    printHtmlViaIframe(a4Html);
+    downloadHtmlFile(defaultFileName, a4Html);
+    showNotification('success', 'A4 Invoice opened for printing & saved to Downloads!');
   } catch (err: any) {
     showNotification('error', `A4 Invoice failed: ${err.message}`);
   } finally {
@@ -790,21 +977,22 @@ const handleDownloadA4Invoice = async () => {
 const handleDownloadQuote = async () => {
   setIsExportingA4(true);
   try {
-    const electronAPI = (window as any).electronAPI;
     const a4Html = buildA4InvoiceHtml(sale, settings, 'QUOTE');
-    const defaultFileName = `AppleVision_Quote_${sale.invoiceNumber}.pdf`;
+    const defaultFileName = `AppleVision_Quote_${sale.invoiceNumber}.html`;
+    const electronAPI = (window as any).electronAPI;
     
     if (electronAPI?.print?.toA4Pdf) {
-      const res = await electronAPI.print.toA4Pdf({ html: a4Html, defaultFileName });
+      const res = await electronAPI.print.toA4Pdf({ html: a4Html, defaultFileName: `AppleVision_Quote_${sale.invoiceNumber}.pdf` });
       if (res?.success && !res?.data?.canceled) {
         showNotification('success', `Quote PDF saved: ${res.data?.filePath || defaultFileName}`);
-      } else if (!res?.data?.canceled) {
-        showNotification('error', res?.message || 'Failed to save Quote');
+        return;
       }
-    } else {
-      const w = window.open('', '_blank');
-      if (w) { w.document.write(a4Html); w.document.close(); w.print(); }
     }
+    
+    // Web Mode: Open isolated print/PDF preview and download standalone file
+    printHtmlViaIframe(a4Html);
+    downloadHtmlFile(defaultFileName, a4Html);
+    showNotification('success', 'A4 Quote opened for printing & saved to Downloads!');
   } catch (err: any) {
     showNotification('error', `Quote failed: ${err.message}`);
   } finally {
